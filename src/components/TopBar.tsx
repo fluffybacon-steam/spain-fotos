@@ -33,7 +33,7 @@ export default function TopBar({
   return (
     <header className="glass absolute inset-x-2 top-2 z-30 flex items-center gap-3 rounded-[4px] px-3 py-2">
       <Link href="/" className="font-display text-lg font-extrabold leading-none tracking-tight">
-        Cala
+        Spain Fotos
       </Link>
 
       <span className="coord hidden truncate sm:block">

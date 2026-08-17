@@ -18,7 +18,7 @@ export default async function LoginPage() {
           <circle cx="32" cy="32" r="3.5" fill="#4CC9C0" />
         </svg>
 
-        <h1 className="font-display text-4xl font-extrabold tracking-tight">Cala</h1>
+        <h1 className="font-display text-4xl font-extrabold tracking-tight">Spain Fotos</h1>
         <p className="mt-2 text-sm text-haze">
           Everyone&apos;s photos from Spain and the Balearics, pinned to where they were taken.
         </p>

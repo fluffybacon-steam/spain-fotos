@@ -10,7 +10,7 @@ const mono = IBM_Plex_Mono({ subsets: ["latin"], variable: "--f-mono", weight: [
 export const metadata: Metadata = {
   title: "Spain Fotos",
   description: "Where the photos were taken.",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Cala" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Spain Fotos" },
   manifest: "/manifest.webmanifest",
 };
 
