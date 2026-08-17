@@ -1,0 +1,335 @@
+/* src/app/globals.css */
+@import "tailwindcss";
+
+@theme {
+  /* Sea-chart palette. Dark throughout so photographs supply the colour and
+     the interface supplies none. */
+  --color-deep: #061219;
+  --color-hull: #0e2029;
+  --color-hull-hi: #17313c;
+  --color-hairline: #244553;
+  --color-foam: #e7efec;
+  --color-haze: #7c9aa4;
+  --color-shoal: #4cc9c0;
+  --color-buoy: #f0b429;
+  --color-coral: #ff7a6b;
+
+  --font-display: var(--f-display), system-ui, sans-serif;
+  --font-sans: var(--f-sans), system-ui, sans-serif;
+  --font-mono: var(--f-mono), ui-monospace, monospace;
+
+  --radius-tile: 3px;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--color-deep);
+  color: var(--color-foam);
+  font-family: var(--font-sans);
+  /* Respect the notch and the home indicator; this lives full-bleed on phones. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-shoal);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Chart labels ─────────────────────────────────────────────────────────
+   Coordinates, timestamps, file sizes. Anything the survey measured rather
+   than anything a person wrote. */
+.coord {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-haze);
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-haze);
+}
+
+.glass {
+  background: color-mix(in srgb, var(--color-hull) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  border: 1px solid var(--color-hairline);
+}
+
+/* ── The signature: a photograph is its own map pin ───────────────────────
+   Not a teardrop with a thumbnail inside it. The picture is the marker. */
+.pin {
+  width: 46px;
+  height: 46px;
+  padding: 2px;
+  background: var(--color-foam);
+  border-radius: var(--radius-tile);
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 0.5),
+    0 0 0 0.5px rgb(0 0 0 / 0.3);
+  cursor: pointer;
+  transform: rotate(-2deg);
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    box-shadow 140ms ease;
+  will-change: transform;
+}
+.pin img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 1px;
+  display: block;
+}
+.pin:hover,
+.pin:focus-visible {
+  transform: rotate(0deg) scale(1.22);
+  box-shadow:
+    0 6px 18px rgb(0 0 0 / 0.6),
+    0 0 0 2px var(--color-shoal);
+  z-index: 5;
+}
+
+/* Clusters read as a physical stack of prints dropped on the chart. */
+.cluster {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.cluster:hover {
+  transform: scale(1.1);
+}
+.cluster-sheet {
+  position: absolute;
+  inset: 6px;
+  background: var(--color-foam);
+  border-radius: var(--radius-tile);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.55);
+}
+.cluster-sheet:nth-child(1) {
+  transform: rotate(-9deg);
+}
+.cluster-sheet:nth-child(2) {
+  transform: rotate(4deg);
+}
+.cluster-sheet:nth-child(3) {
+  transform: rotate(-1deg);
+  padding: 2px;
+}
+.cluster-sheet img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 1px;
+  display: block;
+}
+.cluster-count {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  background: var(--color-shoal);
+  color: var(--color-deep);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-radius: 11px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.6);
+}
+
+/* ── Lightbox ─────────────────────────────────────────────────────────── */
+.lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: color-mix(in srgb, var(--color-deep) 96%, black);
+  display: flex;
+  flex-direction: column;
+  animation: lb-in 180ms ease-out;
+}
+@keyframes lb-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.lightbox-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  touch-action: pan-y pinch-zoom;
+}
+.lightbox-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 2px;
+  box-shadow: 0 24px 70px rgb(0 0 0 / 0.75);
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 3px;
+  color: var(--color-foam);
+  background: color-mix(in srgb, var(--color-hull) 70%, transparent);
+  border: 1px solid var(--color-hairline);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.icon-btn:hover {
+  background: var(--color-hull-hi);
+  border-color: var(--color-shoal);
+}
+
+/* Reaction chips: the emoji is the label, the count is the data. */
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 3px;
+  border: 1px solid var(--color-hairline);
+  background: color-mix(in srgb, var(--color-hull) 70%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-haze);
+  transition:
+    transform 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.reaction:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-haze);
+}
+.reaction[data-mine="true"] {
+  border-color: var(--color-shoal);
+  background: color-mix(in srgb, var(--color-shoal) 16%, transparent);
+  color: var(--color-foam);
+}
+.reaction span.glyph {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.field {
+  width: 100%;
+  height: 46px;
+  padding: 0 13px;
+  background: var(--color-deep);
+  border: 1px solid var(--color-hairline);
+  border-radius: 3px;
+  color: var(--color-foam);
+  font-family: var(--font-sans);
+  font-size: 16px; /* 16px or iOS Safari zooms the whole page on focus */
+}
+.field::placeholder {
+  color: color-mix(in srgb, var(--color-haze) 70%, transparent);
+}
+.field:focus {
+  border-color: var(--color-shoal);
+  outline: none;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 18px;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  transition:
+    background 120ms ease,
+    opacity 120ms ease;
+}
+.btn-primary {
+  background: var(--color-shoal);
+  color: var(--color-deep);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--color-shoal) 85%, white);
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-quiet {
+  background: var(--color-hull);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-foam);
+}
+.btn-quiet:hover {
+  background: var(--color-hull-hi);
+}
+.btn-sm {
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.icon-btn-sm {
+  width: 36px;
+  height: 36px;
+}
+
+.scroll-slim::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: var(--color-hairline);
+  border-radius: 4px;
+}
+.scroll-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Google's own controls sit awkwardly on a dark chart; soften the seams. */
+.gm-style .gm-style-iw-c {
+  background: var(--color-hull) !important;
+  border-radius: 3px !important;
+}
