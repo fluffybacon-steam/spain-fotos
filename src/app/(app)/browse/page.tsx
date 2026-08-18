@@ -107,7 +107,7 @@ export default function BrowsePage() {
               data-mine={who === person.id}
               onClick={() => setWho(person.id === who ? null : person.id)}
             >
-              <Avatar url={person.avatarUrl} name={person.name} size={18} />
+              <Avatar url={person.avatarUrl} name={person.name} size={18} count={person.photoCount}/>
               <span className="max-w-28 truncate">{person.name}</span>
               <span>{person.photoCount}</span>
             </button>
