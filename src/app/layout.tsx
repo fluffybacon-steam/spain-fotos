@@ -8,9 +8,9 @@ const sans = Archivo({ subsets: ["latin"], variable: "--f-sans" });
 const mono = IBM_Plex_Mono({ subsets: ["latin"], variable: "--f-mono", weight: ["400", "500"] });
 
 export const metadata: Metadata = {
-  title: "Travel Fotos",
+  title: "Spain Fotos",
   description: "Sharing is caring",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Travel Fotos" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Spain Fotos" },
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/old_insta.webp",
