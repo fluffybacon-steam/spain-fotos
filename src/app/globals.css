@@ -33,7 +33,10 @@ body {
 }
 
 body {
-  background: var(--color-deep);
+  background-color: var(--color-deep);
+  /* background-image: url('../../public/background.png');
+  background-size: cover;
+  background-attachment: fixed; */
   color: var(--color-foam);
   font-family: var(--font-sans);
   /* Respect the notch and the home indicator; this lives full-bleed on phones. */
@@ -185,6 +188,99 @@ body {
   font-variant-numeric: tabular-nums;
   border-radius: 11px;
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.6);
+}
+
+/* ── Sorting table ────────────────────────────────────────────────────────
+   The same idea as .pin, one step earlier in the process: before a photo is a
+   marker on the chart it's a loose print waiting to be filed. Prints are dealt
+   at slight angles so the tray reads as a physical pile, and a berth is the
+   labelled slot it gets filed into. */
+.print {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  padding: 2px;
+  background: var(--color-foam);
+  border-radius: var(--radius-tile);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.5);
+  /* The pointer drag owns the gesture outright; without this the page scrolls
+     out from under the print on touch. Tapping is the primary path on a phone
+     and stays unaffected. */
+  touch-action: none;
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    box-shadow 140ms ease,
+    opacity 140ms ease;
+}
+.print img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 1px;
+  display: block;
+  pointer-events: none;
+}
+.print:nth-child(3n + 1) {
+  transform: rotate(-2.5deg);
+}
+.print:nth-child(3n + 2) {
+  transform: rotate(1.5deg);
+}
+.print:nth-child(3n + 3) {
+  transform: rotate(-0.5deg);
+}
+.print:hover,
+.print:focus-visible {
+  transform: rotate(0deg) scale(1.06);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 0.6);
+  z-index: 2;
+}
+.print[aria-pressed="true"] {
+  transform: rotate(0deg) scale(1.06);
+  box-shadow:
+    0 6px 16px rgb(0 0 0 / 0.6),
+    0 0 0 2px var(--color-shoal);
+}
+.print[data-lifted="true"] {
+  opacity: 0.25;
+}
+
+/* The print that follows your finger. Straightened and lifted off the table. */
+.print-ghost {
+  position: fixed;
+  z-index: 70;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(0deg) scale(1.18);
+  box-shadow: 0 14px 32px rgb(0 0 0 / 0.7);
+}
+
+.berth {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-height: 74px;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px dashed var(--color-hairline);
+  border-radius: var(--radius-tile);
+  background: color-mix(in srgb, var(--color-hull) 50%, transparent);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.berth:hover {
+  border-color: var(--color-shoal);
+}
+.berth[data-over="true"] {
+  border-style: solid;
+  border-color: var(--color-shoal);
+  background: color-mix(in srgb, var(--color-shoal) 14%, transparent);
+}
+.berth[data-filled="true"] {
+  border-style: solid;
+  border-color: var(--color-hairline);
+  background: var(--color-hull);
 }
 
 /* ── Lightbox ─────────────────────────────────────────────────────────── */
@@ -390,4 +486,72 @@ body {
 .flash-text {
   font-size:1.2rem;
   animation: flash-red 1s ease-in-out infinite; 
+}
+
+/* ── Falling emoji: the login screen's weather ─────────────────────────────
+   Two nested elements per piece. The outer one only descends; the inner one
+   only sways and turns. Splitting them lets the two motions run at unrelated
+   durations, which is what stops twenty pieces reading as one repeating loop.
+
+   The descent is deliberately slower than gravity — this is confetti settling
+   through air, not hail. */
+.emoji-sky {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none; /* the form underneath stays fully clickable */
+  z-index: 0;
+}
+
+.emoji-piece {
+  position: absolute;
+  top: 0;
+  left: var(--x);
+  will-change: transform;
+  animation: emoji-descend var(--fall) linear var(--offset) infinite;
+}
+
+.emoji-piece > span {
+  display: block;
+  font-size: var(--size);
+  opacity: var(--fade);
+  line-height: 1;
+  /* Emoji render as colour glyphs, so a shadow is the only way to keep them
+     from dissolving into a dark chart. */
+  filter: drop-shadow(0 2px 5px rgb(0 0 0 / 0.55));
+  will-change: transform;
+  animation: emoji-tumble var(--spin-time) ease-in-out var(--offset) infinite;
+}
+
+@keyframes emoji-descend {
+  from {
+    transform: translate3d(0, -20vh, 0);
+  }
+  to {
+    transform: translate3d(0, 120vh, 0);
+  }
+}
+
+/* Ends where it starts on the X axis and a whole turn around, so the loop has
+   no visible seam. --spin carries its own sign, giving pieces that tumble both
+   ways. */
+@keyframes emoji-tumble {
+  0% {
+    transform: translateX(calc(var(--drift) * -1)) rotate(0deg);
+  }
+  50% {
+    transform: translateX(var(--drift)) rotate(calc(var(--spin) / 2));
+  }
+  100% {
+    transform: translateX(calc(var(--drift) * -1)) rotate(var(--spin));
+  }
+}
+
+/* The global reduced-motion rule collapses durations to 0.01ms, which would
+   pile every piece in one spot rather than calming anything. Remove the
+   weather instead. */
+@media (prefers-reduced-motion: reduce) {
+  .emoji-sky {
+    display: none;
+  }
 }

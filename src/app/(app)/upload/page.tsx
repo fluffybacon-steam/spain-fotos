@@ -21,20 +21,18 @@ export default function UploadPage() {
         <p className="eyebrow mb-1 flash-text">READ ME</p>
         <ul className="flex flex-col gap-2.5 text-sm text-haze">
           <li>
-            <strong className="text-foam">Send originals, not forwards.</strong> WhatsApp, Telegram
-            and Google Photos links all re-encode the file and drop the GPS tags on the way.
+            Upload photos will be compressed slightly to save my wallet. <strong className="text-foam">Video will not be so please limit number and lengths of those.</strong>
           </li>
           <li>
-            <strong className="text-foam">On iPhone,</strong> check Settings → Privacy → Location
-            Services → Camera is on, and that the share sheet&apos;s Options → Location toggle
-            stayed enabled.
+            Ideally, this web app will tag the locations of your photos automagically using the metadata.
+            This likely <em>won't</em> happen because Apple is a snob about private data they can't sell and strips that shit from any share action.
           </li>
           <li>
-            <strong className="text-foam">On Android,</strong> the Camera app has a Location or
-            Store Location setting that has to be on at the time the photo was taken.
+            In the likely event your photos are not auto-pinned, you can do so manually on the map page for precision pinning.
+            <strong className="text-foam">Or you can select from my pre-selected locations that will show up under the uploads to make it easy.</strong> Or you don't have to pin them at all. its your life.
           </li>
           <li>
-            Screenshots and scans never had coordinates. Pin those by hand from the map. or don't, its your life
+            Feedback, bugs and any suggestions you have are welcome. @ me.
           </li>
         </ul>
       </section>

@@ -2,13 +2,19 @@
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/session";
 import LoginForm from "./LoginForm";
+import EmojiSky from "@/components/EmojiSky";
 
 export default async function LoginPage() {
   if (await currentUser()) redirect("/");
 
   return (
-    <main className="grid min-h-dvh place-items-center px-5 py-10">
-      <div className="w-full max-w-sm">
+    // relative + overflow-hidden: the emoji layer is absolutely positioned to
+    // this element and must be clipped by it rather than by the viewport.
+    <main className="relative grid min-h-dvh place-items-center overflow-hidden px-5 py-10">
+      <EmojiSky />
+
+      {/* z-10 lifts the form clear of the weather behind it. */}
+      <div className="relative z-10 w-full max-w-sm">
         {/* Concentric rings and a rotated print: the wordmark restates the
             thesis — a photograph fixed to a coordinate. */}
         <div className="dancing-lady">💃</div>

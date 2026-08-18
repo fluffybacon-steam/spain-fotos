@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { preparePhoto, putWithProgress, isSupportedImage, isVideo } from "@/lib/client/prepare";
 import { formatDuration } from "@/lib/client/video";
 import { contentHash } from "@/lib/client/hash";
+import PlaceBoard, { type PlaceableItem } from "@/components/PlaceBoard";
 
 type Stage = "queued" | "reading" | "uploading" | "done" | "failed" | "duplicate";
 
@@ -15,6 +16,8 @@ type Job = {
   stage: Stage;
   progress: number;
   hasLocation: boolean;
+  /** Row id minted at presign time — needed to place the photo afterwards. */
+  photoId?: string;
   preview: string | null;
   video: boolean;
   durationMs?: number | null;
@@ -96,6 +99,7 @@ export default function Uploader() {
     if (!presignRes.ok) throw new Error("Couldn't get an upload slot");
     const { slots } = await presignRes.json();
     const slot = slots[0];
+    patch(job.key, { photoId: slot.id });
 
     // Weight progress by payload: the original dominates the transfer.
     let originalDone = 0;
@@ -171,6 +175,13 @@ export default function Uploader() {
   const done = jobs.filter((j) => j.stage === "done").length;
   const skipped = jobs.filter((j) => j.stage === "duplicate").length;
   const withoutLocation = jobs.filter((j) => j.stage === "done" && !j.hasLocation).length;
+
+  // Only uploads that finished, kept no coordinates, and have both a row id and
+  // a thumbnail already in memory. The preview is a blob URL from the resize
+  // step, so the board costs no extra network.
+  const placeable: PlaceableItem[] = jobs
+    .filter((j) => j.stage === "done" && !j.hasLocation && j.photoId && j.preview)
+    .map((j) => ({ id: j.photoId!, thumbUrl: j.preview!, label: j.file.name }));
 
   return (
     <div className="flex flex-col gap-5">
@@ -303,18 +314,23 @@ export default function Uploader() {
             ))}
           </ul>
 
+          {placeable.length > 0 && !running && (
+            <PlaceBoard
+              items={placeable}
+              onPlaced={(ids) =>
+                setJobs((prev) =>
+                  prev.map((j) => (j.photoId && ids.includes(j.photoId) ? { ...j, hasLocation: true } : j)),
+                )
+              }
+            />
+          )}
+
           {withoutLocation > 0 && !running && (
-            <div className="rounded-[3px] border border-buoy/40 bg-buoy/10 px-3.5 py-3">
-              <p className="text-sm">
-                {withoutLocation} {withoutLocation === 1 ? "photo has" : "photos have"} no GPS data.
-                Open the map and use <strong>unplaced</strong> in the top bar — it can guess from
-                the timestamp or snap them to a spot you&apos;ve already tagged.
-              </p>
-              <p className="coord mt-2">
-                To find out what stripped them, open{" "}
-                <a href="/debug" className="underline underline-offset-2">the metadata check</a>.
-              </p>
-            </div>
+            <p className="coord">
+              Need somewhere that isn&apos;t on the list? Use <strong>unplaced</strong> on the map to
+              drop a pin. To find out what stripped the coordinates, open{" "}
+              <a href="/debug" className="underline underline-offset-2">the metadata check</a>.
+            </p>
           )}
 
           {done > 0 && !running && (
