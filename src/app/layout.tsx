@@ -8,10 +8,15 @@ const sans = Archivo({ subsets: ["latin"], variable: "--f-sans" });
 const mono = IBM_Plex_Mono({ subsets: ["latin"], variable: "--f-mono", weight: ["400", "500"] });
 
 export const metadata: Metadata = {
-  title: "Spain Fotos",
-  description: "Where the photos were taken.",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Spain Fotos" },
+  title: "Travel Fotos",
+  description: "Sharing is caring",
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Travel Fotos" },
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/old_insta.webp",
+    shortcut: "/old_insta.webp",
+    apple: "/old_insta.webp",
+  },
 };
 
 export const viewport: Viewport = {

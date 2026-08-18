@@ -105,6 +105,24 @@ body {
   border-radius: 1px;
   display: block;
 }
+.pin-play {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  font-size: 7px;
+  color: var(--color-deep);
+  background: var(--color-foam);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+}
+.pin {
+  position: relative;
+}
+
 .pin:hover,
 .pin:focus-visible {
   transform: rotate(0deg) scale(1.22);

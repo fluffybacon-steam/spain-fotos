@@ -1,8 +1,8 @@
 // src/app/api/photos/route.ts
 import { NextResponse } from "next/server";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, photos, users, reactions, REACTION_KINDS, type ReactionKind } from "@/db";
+import { db, photos, users, reactions, comments, REACTION_KINDS, type ReactionKind } from "@/db";
 import { requireUser, guard } from "@/lib/session";
 import type { PhotoDTO } from "@/types";
 
@@ -30,6 +30,15 @@ export const GET = guard(async () => {
     ? await db.select().from(reactions).where(inArray(reactions.photoId, ids))
     : [];
 
+  const commentRows = ids.length
+    ? await db
+        .select({ photoId: comments.photoId, n: sql<number>`cast(count(*) as int)` })
+        .from(comments)
+        .where(inArray(comments.photoId, ids))
+        .groupBy(comments.photoId)
+    : [];
+  const commentCounts = new Map(commentRows.map((r) => [r.photoId, r.n]));
+
   const tallies = new Map<string, Record<ReactionKind, number>>();
   const mine = new Map<string, ReactionKind>();
   for (const r of allReactions) {
@@ -44,8 +53,11 @@ export const GET = guard(async () => {
     ownerId: p.ownerId,
     ownerName,
     ownerAvatarUrl: ownerAvatarKey ? `/api/img/${p.ownerId}/avatar` : null,
+    mediaType: (p.mediaType === "video" ? "video" : "photo") as "photo" | "video",
+    durationMs: p.durationMs,
     thumbUrl: `/api/img/${p.id}/thumb`,
     displayUrl: `/api/img/${p.id}/display`,
+    originalUrl: `/api/img/${p.id}/original`,
     downloadUrl: `/api/img/${p.id}/original?download=1`,
     width: p.width,
     height: p.height,
@@ -58,6 +70,7 @@ export const GET = guard(async () => {
     caption: p.caption,
     originalName: p.originalName,
     originalBytes: p.originalBytes,
+    commentCount: commentCounts.get(p.id) ?? 0,
     reactions: tallies.get(p.id) ?? emptyTally(),
     myReaction: mine.get(p.id) ?? null,
   }));
@@ -73,6 +86,8 @@ const CreateBody = z.object({
         originalKey: z.string().min(1),
         displayKey: z.string().min(1),
         thumbKey: z.string().min(1),
+        mediaType: z.enum(["photo", "video"]).default("photo"),
+        durationMs: z.number().int().nonnegative().nullable().default(null),
         originalName: z.string().min(1).max(255),
         originalMime: z.string().max(120),
         originalBytes: z.number().int().nonnegative(),
@@ -109,6 +124,8 @@ export const POST = guard(async (req: Request) => {
       originalKey: r.originalKey,
       displayKey: r.displayKey,
       thumbKey: r.thumbKey,
+      mediaType: r.mediaType,
+      durationMs: r.durationMs,
       originalName: r.originalName,
       originalMime: r.originalMime,
       originalBytes: r.originalBytes,

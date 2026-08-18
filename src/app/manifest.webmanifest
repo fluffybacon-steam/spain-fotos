@@ -1,10 +1,10 @@
 {
-  "name": "Cala",
-  "short_name": "Cala",
-  "description": "Where the photos were taken.",
+  "name": "Travel Fotos",
+  "short_name": "TF",
+  "description": "Sharing is caring",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#061219",
   "theme_color": "#061219",
-  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+  "icons": [{ "src": "/old_insta.webp", "sizes": "any", "type": "image/webp", "purpose": "any" }]
 }

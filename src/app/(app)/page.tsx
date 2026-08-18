@@ -8,6 +8,7 @@ import PlacePicker from "@/components/PlacePicker";
 import Lightbox from "@/components/Lightbox";
 import TopBar from "@/components/TopBar";
 import { isLocated, nearestNamed, type NamedPlace } from "@/lib/places";
+import { PRESET_PLACES } from "@/lib/preset-places";
 import type { PersonDTO, PhotoDTO } from "@/types";
 
 export default function MapPage() {
@@ -37,6 +38,9 @@ export default function MapPage() {
       setLoading(false);
     })();
   }, []);
+
+  // Presets are always available for naming, even before anyone saves one.
+  const allNames = useMemo(() => [...PRESET_PLACES, ...namedPlaces], [namedPlaces]);
 
   const located = useMemo(() => photos.filter(isLocated), [photos]);
   const unplaced = useMemo(() => photos.filter((p) => !isLocated(p)), [photos]);
@@ -76,12 +80,12 @@ export default function MapPage() {
       }
 
       // Offer to name a spot only where there isn't one already nearby.
-      if (!nearestNamed({ lat, lng }, namedPlaces)) {
+      if (!nearestNamed({ lat, lng }, allNames)) {
         setNaming({ lat, lng, ids });
         setPlaceName("");
       }
     },
-    [photos, namedPlaces],
+    [photos, allNames],
   );
 
   async function saveName() {
@@ -147,7 +151,7 @@ export default function MapPage() {
         <PlacePicker
           unplaced={unplaced}
           located={located}
-          namedPlaces={namedPlaces}
+          namedPlaces={allNames}
           onApply={applyLocation}
           onDropPin={(ids) => {
             setPinFor(ids);
@@ -172,7 +176,7 @@ export default function MapPage() {
           index={lightboxIndex}
           onIndexChange={setLightboxIndex}
           onPhotoChange={updatePhoto}
-          namedPlaces={namedPlaces}
+          namedPlaces={allNames}
           onClose={() => {
             setLightboxIndex(null);
             if (panelPhotos.length === 1) setPanel(null);
