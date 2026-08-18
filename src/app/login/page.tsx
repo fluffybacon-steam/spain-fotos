@@ -28,7 +28,6 @@ export default async function LoginPage() {
           <LoginForm />
         </div>
 
-        <p className="coord mt-8">Ask whoever set this up for your name and password</p>
       </div>
     </main>
   );
