@@ -56,7 +56,7 @@ export default function TopBar({
 
       <Link href="/browse" className="hidden items-center -space-x-2 sm:flex" title="Browse everyone\u2019s photos">
         {people.slice(0, 5).map((p) => (
-          <Avatar key={p.id} url={p.avatarUrl} name={p.name} size={26} count={p.photoCount}/>
+          <Avatar key={p.id} url={p.avatarUrl} name={p.name} size={26} count={p.photoCount} />
         ))}
       </Link>
 
