@@ -134,6 +134,14 @@ Selection is multiple by default, so a whole afternoon of forwarded photos goes 
 
 Anything placed by hand is stored as `locationSource: 'manual'` and labelled in the viewer, so nobody later mistakes a guess for a measurement.
 
+### Trip destinations
+
+Six preset stops — Barcelona, Port de Sóller, Sóller, Fornalutx, Bilbao, San Sebastián — appear in the picker as one-tap targets, and are used for labelling too, so a photo placed at Sóller shows "Sóller" rather than coordinates without anyone saving a place first.
+
+Their radii are deliberately uneven. Cities get 5–6 km because a photo anywhere in Bilbao really is Bilbao; the three Sóller-valley villages get 850 m each, because Sóller and Fornalutx are only **1.88 km apart** and wider radii would let one silently claim the other's photos. Change a radius in `src/lib/preset-places.ts` and check that gap still holds.
+
+A preset is hidden from the picker once a real photo cluster already covers it, so the same place never appears twice.
+
 ### Naming places
 
 After placing photos somewhere with no named spot nearby, you're offered the chance to name it. Names live in the `places` table and are matched to photos **by proximity at read time** rather than by foreign key — so naming a cove retroactively labels every photo already sitting in it, including ones placed by EXIF months earlier. Naming is always optional; skipping leaves plain coordinates.
@@ -141,6 +149,32 @@ After placing photos somewhere with no named spot nearby, you're offered the cha
 **Who may place what:** anyone in the trip can place a photo that has *no* location, because the group often remembers where a shot was taken when its owner doesn't. Only the owner can move one that's already placed, so a real GPS reading can't be overwritten by someone else's guess.
 
 ---
+
+## Video
+
+Videos upload alongside photos and appear on the map as pins with a play badge. Three things differ from the photo path:
+
+**Location comes from a different place entirely.** MP4 and QuickTime store it in a `moov/udta/©xyz` box as an ISO 6709 string, not in EXIF — exifr can't read it. `src/lib/client/video.ts` walks the box tree directly. Recorded video usually puts `moov` at the *end* of the file, so the walker reads box headers one at a time and fetches only the metadata; a 400 MB clip costs a few KB of reads. Capture time comes from `mvhd`, whose epoch is 1904-01-01, not 1970.
+
+**Nothing is transcoded.** No browser can re-encode 4K in reasonable time, and R2 storage is cheaper than trying. The original is uploaded untouched and a poster frame is generated to stand in as the thumbnail everywhere the app renders a still.
+
+**HEVC is the real limitation.** iPhones record HEVC by default. Safari and iOS play it; Chrome and Firefox on desktop generally can't. The upload still succeeds — poster generation falls back to a placeholder tile, and the lightbox detects the playback failure and offers a download instead. If it matters to your group, iPhone → Settings → Camera → Formats → **Most Compatible** records H.264 instead, though only for future recordings.
+
+Watch file sizes: 4K/60 runs roughly 400 MB per minute. Presigned PUT handles it (R2's single-PUT limit is 5 GB), but uploading that over hotel wifi is its own adventure.
+
+## Live Photos
+
+Nothing to configure — they already work, as their still frame.
+
+A Live Photo is two files: a HEIC still plus a short MOV, linked by an asset identifier inside the Photos library. A browser file input has no access to that pairing; iOS hands over **only the still**. So a Live Photo behaves exactly like a normal photo, keeps its EXIF and GPS, and lands on the map correctly.
+
+If someone wants the motion preserved, they can open the Live Photo in Photos, use the share sheet's **Save as Video**, and upload the resulting clip through the video path above.
+
+## Gallery and comments
+
+`/browse` is the non-map view: every photo by everyone, grouped under date headings, filterable to one person by tapping their chip. Opening any photo gives the same lightbox as the map, so reactions and comments work identically in both places.
+
+Comments are flat — no threading, no mentions. They load lazily when the thread is opened rather than with the gallery, since a trip's worth of comments is a lot of rows nobody has asked for yet. Anyone can comment; only the author (or an admin) can delete. While the comment box has focus, the lightbox stops listening for arrow keys and Escape — otherwise typing would flip to the next photo mid-sentence.
 
 ## Interface notes
 

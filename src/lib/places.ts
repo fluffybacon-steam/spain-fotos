@@ -3,7 +3,12 @@ import type { PhotoDTO } from "@/types";
 
 export type Point = { lat: number; lng: number };
 
-export type NamedPlace = Point & { id: string; name: string };
+export type NamedPlace = Point & {
+  id: string;
+  name: string;
+  /** Optional override — a city claims a wider area than a cove. */
+  radiusMeters?: number;
+};
 
 /** A spot inferred from where photos already sit, not something anyone typed. */
 export type DerivedPlace = Point & {
@@ -116,7 +121,8 @@ export function nameClusters(
         best = place;
       }
     }
-    return { ...cluster, name: best && bestDistance <= maxMeters ? best.name : null };
+    const limit = best?.radiusMeters ?? maxMeters;
+    return { ...cluster, name: best && bestDistance <= limit ? best.name : null };
   });
 }
 
@@ -134,7 +140,8 @@ export function nearestNamed(
       best = place;
     }
   }
-  return best && bestDistance <= maxMeters ? best : null;
+  const limit = best?.radiusMeters ?? maxMeters;
+  return best && bestDistance <= limit ? best : null;
 }
 
 /**

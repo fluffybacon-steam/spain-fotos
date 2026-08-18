@@ -6,6 +6,8 @@ import type { PhotoDTO } from "@/types";
 import ReactionBar from "./ReactionBar";
 import Avatar from "./Avatar";
 import { nearestNamed, type NamedPlace } from "@/lib/places";
+import Comments from "./Comments";
+import { formatDuration } from "@/lib/client/video";
 
 type Props = {
   photos: PhotoDTO[];
@@ -27,6 +29,9 @@ export default function Lightbox({
   const photo = photos[index];
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const [showMeta, setShowMeta] = useState(true);
+  const [showComments, setShowComments] = useState(false);
+  const [playbackFailed, setPlaybackFailed] = useState(false);
+  const [commentCount, setCommentCount] = useState<number | null>(null);
 
   const go = useCallback(
     (delta: number) => {
@@ -38,6 +43,11 @@ export default function Lightbox({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Arrow keys and Escape belong to whatever field has focus.
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowRight") go(1);
       else if (e.key === "ArrowLeft") go(-1);
@@ -57,12 +67,20 @@ export default function Lightbox({
   useEffect(() => {
     [index - 1, index + 1].forEach((i) => {
       const p = photos[i];
-      if (p) {
+      if (p && p.mediaType !== "video") {
         const img = new Image();
         img.src = p.displayUrl;
       }
     });
   }, [index, photos]);
+
+  // Collapse the thread when moving to another photo, so the count and body
+  // can never belong to the previous one.
+  useEffect(() => {
+    setShowComments(false);
+    setCommentCount(null);
+    setPlaybackFailed(false);
+  }, [photo?.id]);
 
   if (!photo) return null;
 
@@ -132,13 +150,44 @@ export default function Lightbox({
           touchStart.current = null;
         }}
       >
-        <img
-          key={photo.id}
-          src={photo.displayUrl}
-          alt={photo.caption ?? `Photo by ${photo.ownerName}`}
-          width={photo.width}
-          height={photo.height}
-        />
+        {photo.mediaType === "video" ? (
+          playbackFailed ? (
+            /* The browser can't decode this codec — almost always HEVC from an
+               iPhone viewed on desktop Chrome. Show the poster and hand over to
+               a download, which always works. */
+            <div className="flex flex-col items-center gap-4 p-6 text-center">
+              <img src={photo.thumbUrl} alt="" className="max-h-[50vh] rounded-[2px] opacity-70" />
+              <div>
+                <p className="text-sm font-semibold">This browser can&apos;t play this video</p>
+                <p className="coord mt-1">
+                  Usually HEVC recorded by an iPhone. Safari and iOS play it fine.
+                </p>
+              </div>
+              <a href={photo.downloadUrl} className="btn btn-primary">
+                Download to watch
+              </a>
+            </div>
+          ) : (
+            <video
+              key={photo.id}
+              src={photo.originalUrl}
+              poster={photo.displayUrl}
+              controls
+              playsInline
+              preload="metadata"
+              onError={() => setPlaybackFailed(true)}
+              className="max-h-full max-w-full rounded-[2px]"
+            />
+          )
+        ) : (
+          <img
+            key={photo.id}
+            src={photo.displayUrl}
+            alt={photo.caption ?? `Photo by ${photo.ownerName}`}
+            width={photo.width}
+            height={photo.height}
+          />
+        )}
 
         {index > 0 && (
           <button
@@ -198,11 +247,38 @@ export default function Lightbox({
             {photo.caption && <p className="text-sm text-foam/90">{photo.caption}</p>}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <ReactionBar photo={photo} onChange={onPhotoChange} />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <ReactionBar photo={photo} onChange={onPhotoChange} />
+                <button
+                  type="button"
+                  className="reaction"
+                  data-mine={showComments}
+                  aria-expanded={showComments}
+                  onClick={() => setShowComments((v) => !v)}
+                >
+                  <span className="glyph">💬</span>
+                  <span>{commentCount ?? photo.commentCount}</span>
+                </button>
+              </div>
               <p className="coord">
-                {photo.cameraModel ?? "Unknown camera"} · {(photo.originalBytes / 1_048_576).toFixed(1)} MB
+                {photo.mediaType === "video"
+                  ? `Video${photo.durationMs ? ` · ${formatDuration(photo.durationMs)}` : ""}`
+                  : (photo.cameraModel ?? "Unknown camera")}{" "}
+                · {(photo.originalBytes / 1_048_576).toFixed(1)} MB
               </p>
             </div>
+
+            {showComments && (
+              <div className="border-t border-hairline pt-3">
+                <Comments
+                  photoId={photo.id}
+                  onCountChange={(n) => {
+                    setCommentCount(n);
+                    onPhotoChange({ ...photo, commentCount: n });
+                  }}
+                />
+              </div>
+            )}
           </div>
         </footer>
       )}

@@ -33,8 +33,19 @@ export async function readExif(file: File): Promise<PhotoExif> {
     });
     if (!data) return empty;
 
-    const lat = numeric(data.latitude);
-    const lng = numeric(data.longitude);
+    let lat = numeric(data.latitude);
+    let lng = numeric(data.longitude);
+
+    // Second attempt via the dedicated GPS reader. Some files carry GPS in a
+    // layout the general parse doesn't surface, and this costs nothing when the
+    // first attempt already succeeded.
+    if (lat === null || lng === null) {
+      const gps = await exifr.gps(file).catch(() => null);
+      if (gps) {
+        lat = numeric(gps.latitude);
+        lng = numeric(gps.longitude);
+      }
+    }
 
     return {
       // 0,0 in the Gulf of Guinea is the classic "GPS chip returned nothing"

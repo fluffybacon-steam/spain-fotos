@@ -67,6 +67,11 @@ export default function PhotoPanel({
               decoding="async"
               className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
             />
+                {photo.mediaType === "video" && (
+                  <span className="pointer-events-none absolute inset-0 grid place-items-center">
+                    <span className="grid h-7 w-7 place-items-center rounded-full bg-deep/70 text-[10px]">▶</span>
+                  </span>
+                )}
             <span className="absolute bottom-1 left-1 opacity-0 transition-opacity group-hover:opacity-100">
               <Avatar url={photo.ownerAvatarUrl} name={photo.ownerName} size={20} />
             </span>

@@ -2,7 +2,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { readSession, SESSION_COOKIE } from "@/lib/session";
 
-const PUBLIC = ["/login", "/api/auth/login", "/manifest.webmanifest", "/icon.svg"];
+const PUBLIC = ["/login", "/api/auth/login", "/manifest.webmanifest", "/old_insta.webp"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;

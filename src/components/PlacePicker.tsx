@@ -13,6 +13,7 @@ import {
   type DerivedPlace,
   type NamedPlace,
 } from "@/lib/places";
+import { PRESET_PLACES } from "@/lib/preset-places";
 
 type Props = {
   unplaced: PhotoDTO[];
@@ -40,6 +41,13 @@ export default function PlacePicker({
   );
 
   const selectedPhotos = unplaced.filter((p) => selected.has(p.id));
+
+  // Only offer presets that aren't already represented by a real cluster —
+  // otherwise "Sóller" appears twice, once with photos and once without.
+  const presets = useMemo(
+    () => PRESET_PLACES.filter((preset) => !spots.some((s) => distanceMeters(s, preset) <= (preset.radiusMeters ?? 250))),
+    [spots],
+  );
 
   // Only offer a time-based guess when exactly one photo is selected — the
   // suggestion is per-photo and averaging it across a selection would be a lie.
@@ -191,6 +199,27 @@ export default function PlacePicker({
             ))}
           </ul>
         </div>
+
+        {/* Trip destinations ------------------------------------------- */}
+        {presets.length > 0 && (
+          <div className="border-t border-hairline p-3">
+            <p className="eyebrow mb-2">Trip destinations</p>
+            <div className="flex flex-wrap gap-1.5">
+              {presets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  disabled={busy || !selected.size}
+                  onClick={() => apply(preset.lat, preset.lng)}
+                  className="reaction disabled:opacity-40"
+                >
+                  <span className="glyph">📍</span>
+                  <span>{preset.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <footer className="border-t border-hairline p-3">

@@ -1,5 +1,6 @@
 // src/lib/client/prepare.ts
 import { readExif, type PhotoExif } from "./exif";
+import { readVideoLocation, readVideoFrame, placeholderPoster } from "./video";
 
 export type PreparedPhoto = {
   file: File;
@@ -9,6 +10,10 @@ export type PreparedPhoto = {
   width: number;
   height: number;
   ext: string;
+  mediaType: "photo" | "video";
+  durationMs: number | null;
+  /** True when the codec wouldn't decode, so the poster is a placeholder. */
+  posterFailed?: boolean;
 };
 
 const DISPLAY_MAX = 2560;
@@ -24,8 +29,12 @@ export function isHeicLike(file: File) {
   return /\.(heic|heif)$/i.test(file.name) && (t === "" || t === "application/octet-stream");
 }
 
+export function isVideo(file: File) {
+  return file.type.startsWith("video/") || /\.(mov|mp4|m4v|3gp|avi|mkv|webm)$/i.test(file.name);
+}
+
 export function isSupportedImage(file: File) {
-  return file.type.startsWith("image/") || isHeicLike(file);
+  return file.type.startsWith("image/") || isHeicLike(file) || isVideo(file);
 }
 
 /**
@@ -36,6 +45,8 @@ export function isSupportedImage(file: File) {
  * pixels — without it roughly half of any iPhone set renders sideways.
  */
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {
+  if (isVideo(file)) return prepareVideo(file);
+
   const exif = await readExif(file);
 
   let decodable: Blob = file;
@@ -61,10 +72,64 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
       width: display.width,
       height: display.height,
       ext,
+      mediaType: "photo",
+      durationMs: null,
     };
   } finally {
     bitmap.close();
   }
+}
+
+/**
+ * Videos are uploaded untouched — no browser can transcode 400 MB of 4K in any
+ * reasonable time, and R2 storage is cheaper than the attempt. What we generate
+ * is a poster frame, which stands in for the still everywhere the app renders a
+ * thumbnail.
+ *
+ * When the codec won't decode (Chrome on desktop cannot play the HEVC that
+ * iPhones record by default) the poster falls back to a placeholder tile so the
+ * upload still succeeds and the clip stays downloadable.
+ */
+async function prepareVideo(file: File): Promise<PreparedPhoto> {
+  const location = await readVideoLocation(file);
+
+  let width = 0;
+  let height = 0;
+  let durationMs = 0;
+  let poster: Blob | null = null;
+
+  try {
+    const frame = await readVideoFrame(file);
+    width = frame.width;
+    height = frame.height;
+    durationMs = frame.durationMs;
+    poster = frame.poster;
+  } catch {
+    poster = null;
+  }
+
+  const posterFailed = !poster;
+  if (!poster) poster = await placeholderPoster();
+  if (!poster) throw new Error("Couldn't prepare this video");
+
+  return {
+    file,
+    exif: {
+      lat: location.lat,
+      lng: location.lng,
+      takenAt: location.takenAt ?? (file.lastModified ? new Date(file.lastModified) : null),
+      cameraMake: null,
+      cameraModel: null,
+    },
+    display: poster,
+    thumb: poster,
+    width: width || 1280,
+    height: height || 720,
+    ext: extensionOf(file),
+    mediaType: "video",
+    durationMs: durationMs || null,
+    posterFailed,
+  };
 }
 
 async function encode(bitmap: ImageBitmap, maxEdge: number, quality: number) {

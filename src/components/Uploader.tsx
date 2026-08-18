@@ -3,7 +3,8 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { preparePhoto, putWithProgress, isSupportedImage } from "@/lib/client/prepare";
+import { preparePhoto, putWithProgress, isSupportedImage, isVideo } from "@/lib/client/prepare";
+import { formatDuration } from "@/lib/client/video";
 
 type Stage = "queued" | "reading" | "uploading" | "done" | "failed";
 
@@ -14,6 +15,9 @@ type Job = {
   progress: number;
   hasLocation: boolean;
   preview: string | null;
+  video: boolean;
+  durationMs?: number | null;
+  posterFailed?: boolean;
   error?: string;
 };
 
@@ -24,6 +28,7 @@ const CONCURRENCY = 2;
 export default function Uploader() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const browseRef = useRef<HTMLInputElement>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
 
@@ -42,6 +47,7 @@ export default function Uploader() {
         progress: 0,
         hasLocation: false,
         preview: null,
+        video: isVideo(file),
       }));
     setJobs((prev) => [...prev, ...incoming]);
   }
@@ -54,6 +60,8 @@ export default function Uploader() {
     patch(job.key, {
       preview: previewUrl,
       hasLocation: prepared.exif.lat !== null,
+      durationMs: prepared.durationMs,
+      posterFailed: prepared.posterFailed,
       stage: "uploading",
     });
 
@@ -91,6 +99,8 @@ export default function Uploader() {
           {
             id: slot.id,
             ...slot.keys,
+            mediaType: prepared.mediaType,
+            durationMs: prepared.durationMs,
             originalName: job.file.name,
             originalMime: slot.originalMime,
             originalBytes: job.file.size,
@@ -145,11 +155,25 @@ export default function Uploader() {
         ref={inputRef}
         type="file"
         multiple
-        accept="image/*,.heic,.heif,.HEIC,.HEIF"
+        accept="image/*,video/*,.heic,.heif,.HEIC,.HEIF,.mov,.MOV"
         className="sr-only"
         onChange={(e) => {
           addFiles(e.target.files);
           e.target.value = ""; // allow re-picking the same file after a failure
+        }}
+      />
+
+      {/* No accept attribute: on Android this opens the documents browser
+          instead of the media picker. Android 13+ redacts location from photo
+          picker results, so this route often keeps GPS when the other loses it. */}
+      <input
+        ref={browseRef}
+        type="file"
+        multiple
+        className="sr-only"
+        onChange={(e) => {
+          addFiles(e.target.files);
+          e.target.value = "";
         }}
       />
 
@@ -160,8 +184,17 @@ export default function Uploader() {
       >
         <span className="font-display text-xl font-bold">Choose photos</span>
         <span className="mt-1.5 text-sm text-haze">
-          Pick from your camera roll, not a chat thread — that&apos;s where the location lives
+          Photos and videos. Pick from your camera roll, not a chat thread — that&apos;s where the
+          location lives
         </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => browseRef.current?.click()}
+        className="coord underline underline-offset-2 hover:text-foam"
+      >
+        On Android and losing locations? Browse files instead
       </button>
 
       {jobs.length > 0 && (
@@ -201,9 +234,13 @@ export default function Uploader() {
                     {job.stage === "failed"
                       ? job.error
                       : job.stage === "done"
-                        ? job.hasLocation
-                          ? "Placed on the map"
-                          : "No location — you can pin it by hand"
+                        ? [
+                            job.video && job.durationMs ? formatDuration(job.durationMs) : null,
+                            job.hasLocation ? "Placed on the map" : "No location — pin it by hand",
+                            job.posterFailed ? "no preview (codec)" : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
                         : job.stage === "reading"
                           ? "Reading metadata"
                           : job.stage === "uploading"
@@ -221,7 +258,7 @@ export default function Uploader() {
                 </div>
 
                 <span aria-hidden="true" className="text-sm">
-                  {job.stage === "done" ? (job.hasLocation ? "📍" : "❓") : job.stage === "failed" ? "⚠️" : ""}
+                  {job.stage === "done" ? (job.video ? "🎬" : job.hasLocation ? "📍" : "❓") : job.stage === "failed" ? "⚠️" : ""}
                 </span>
               </li>
             ))}
@@ -231,7 +268,12 @@ export default function Uploader() {
             <div className="rounded-[3px] border border-buoy/40 bg-buoy/10 px-3.5 py-3">
               <p className="text-sm">
                 {withoutLocation} {withoutLocation === 1 ? "photo has" : "photos have"} no GPS data.
-                Open the map and use <strong>unplaced</strong> in the top bar to drop pins by hand.
+                Open the map and use <strong>unplaced</strong> in the top bar — it can guess from
+                the timestamp or snap them to a spot you&apos;ve already tagged.
+              </p>
+              <p className="coord mt-2">
+                To find out what stripped them, open{" "}
+                <a href="/debug" className="underline underline-offset-2">the metadata check</a>.
               </p>
             </div>
           )}

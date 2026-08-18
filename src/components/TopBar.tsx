@@ -54,10 +54,14 @@ export default function TopBar({
         </button>
       )}
 
-      <Link href="/people" className="hidden items-center -space-x-2 sm:flex" title="Everyone">
+      <Link href="/browse" className="hidden items-center -space-x-2 sm:flex" title="Browse everyone\u2019s photos">
         {people.slice(0, 5).map((p) => (
           <Avatar key={p.id} url={p.avatarUrl} name={p.name} size={26} />
         ))}
+      </Link>
+
+      <Link href="/browse" className="btn btn-quiet btn-sm sm:hidden">
+        Gallery
       </Link>
 
       <Link href="/upload" className="btn btn-primary btn-sm">

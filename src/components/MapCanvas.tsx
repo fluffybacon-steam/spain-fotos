@@ -111,6 +111,13 @@ export default function MapCanvas({ photos, onOpen, onCenterChange, pickMode, on
       img.decoding = "async";
       el.appendChild(img);
 
+      if (photo.mediaType === "video") {
+        const play = document.createElement("span");
+        play.className = "pin-play";
+        play.textContent = "▶";
+        el.appendChild(play);
+      }
+
       const marker = new google.maps.marker.AdvancedMarkerElement({
         position: { lat: photo.lat, lng: photo.lng },
         content: el,

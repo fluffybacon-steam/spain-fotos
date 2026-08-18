@@ -34,6 +34,11 @@ export const photos = pgTable(
     displayKey: text("display_key").notNull(),
     thumbKey: text("thumb_key").notNull(),
 
+    // 'photo' | 'video'. Videos reuse displayKey/thumbKey for their poster
+    // frame, so every read path that renders a still keeps working unchanged.
+    mediaType: text("media_type").notNull().default("photo"),
+    durationMs: integer("duration_ms"),
+
     originalName: text("original_name").notNull(),
     originalMime: text("original_mime").notNull(),
     originalBytes: bigint("original_bytes", { mode: "number" }).notNull(),
@@ -77,6 +82,23 @@ export const places = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("places_coords_idx").on(t.lat, t.lng)],
+);
+
+/** Flat comments — no threading, no mentions. Sorted oldest-first on read. */
+export const comments = pgTable(
+  "comments",
+  {
+    id: text("id").primaryKey(),
+    photoId: text("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("comments_photo_idx").on(t.photoId, t.createdAt)],
 );
 
 export const REACTION_KINDS = ["heart", "up", "meh", "down", "poo"] as const;

@@ -6,8 +6,11 @@ export type PhotoDTO = {
   ownerId: string;
   ownerName: string;
   ownerAvatarUrl: string | null;
+  mediaType: "photo" | "video";
+  durationMs: number | null;
   thumbUrl: string;
   displayUrl: string;
+  originalUrl: string;
   downloadUrl: string;
   width: number;
   height: number;
@@ -20,8 +23,20 @@ export type PhotoDTO = {
   caption: string | null;
   originalName: string;
   originalBytes: number;
+  commentCount: number;
   reactions: Record<ReactionKind, number>;
   myReaction: ReactionKind | null;
+};
+
+export type CommentDTO = {
+  id: string;
+  photoId: string;
+  userId: string;
+  authorName: string;
+  authorAvatarUrl: string | null;
+  body: string;
+  createdAt: string;
+  mine: boolean;
 };
 
 export type PersonDTO = {
