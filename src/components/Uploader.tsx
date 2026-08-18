@@ -216,10 +216,9 @@ export default function Uploader() {
         onClick={() => inputRef.current?.click()}
         className="grid place-items-center rounded-[4px] border border-dashed border-hairline bg-hull/50 px-6 py-10 text-center transition-colors hover:border-shoal"
       >
-        <span className="font-display text-xl font-bold">Choose photos</span>
+        <span className="font-display text-xl font-bold">Choose fotos/vids</span>
         <span className="mt-1.5 text-sm text-haze">
-          Photos and videos. Pick from your camera roll, not a chat thread — that&apos;s where the
-          location lives
+          Click or drop into 🌋
         </span>
       </button>
 
