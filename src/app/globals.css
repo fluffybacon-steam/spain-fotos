@@ -351,3 +351,28 @@ body {
   background: var(--color-hull) !important;
   border-radius: 3px !important;
 }
+
+
+.dancing-lady {
+  display: inline-block;
+  font-size: 2rem;
+  animation: walk-and-flip 6s ease-in-out infinite;
+}
+
+@keyframes walk-and-flip {
+  0% {
+    transform: translateX(0) scaleX(1);
+  }
+  45% {
+    transform: translateX(6rem) scaleX(1);
+  }
+  50% {
+    transform: translateX(6rem) scaleX(-1);
+  }
+  95% {
+    transform: translateX(0) scaleX(-1);
+  }
+  100% {
+    transform: translateX(0) scaleX(1);
+  }
+}
