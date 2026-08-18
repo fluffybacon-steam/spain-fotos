@@ -16,6 +16,9 @@ type Props = {
   onClose: () => void;
   onPhotoChange: (photo: PhotoDTO) => void;
   namedPlaces?: NamedPlace[];
+  /** Signed-in user id, so the owner sees a delete control. */
+  meId?: string;
+  onDeleted?: (photoId: string) => void;
 };
 
 export default function Lightbox({
@@ -25,12 +28,16 @@ export default function Lightbox({
   onClose,
   onPhotoChange,
   namedPlaces = [],
+  meId,
+  onDeleted,
 }: Props) {
   const photo = photos[index];
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const [showMeta, setShowMeta] = useState(true);
   const [showComments, setShowComments] = useState(false);
   const [playbackFailed, setPlaybackFailed] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [commentCount, setCommentCount] = useState<number | null>(null);
 
   const go = useCallback(
@@ -80,6 +87,7 @@ export default function Lightbox({
     setShowComments(false);
     setCommentCount(null);
     setPlaybackFailed(false);
+    setConfirmDelete(false);
   }, [photo?.id]);
 
   if (!photo) return null;
@@ -119,6 +127,19 @@ export default function Lightbox({
             <circle cx="8" cy="4.9" r="0.9" fill="currentColor" />
           </svg>
         </button>
+
+        {meId && photo.ownerId === meId && (
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => setConfirmDelete(true)}
+            aria-label="Delete this photo"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 4.4h10M6.4 4.4V2.9h3.2v1.5M4.4 4.4l.6 8.7h6l.6-8.7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
 
         <a
           className="icon-btn"
@@ -214,6 +235,48 @@ export default function Lightbox({
           </button>
         )}
       </div>
+
+      {confirmDelete && (
+        <div className="absolute inset-0 z-10 grid place-items-center bg-deep/85 p-6">
+          <div className="glass w-full max-w-sm rounded-[4px] p-5">
+            <p className="eyebrow">This can&apos;t be undone</p>
+            <h3 className="mt-2 font-display text-xl font-bold">
+              Delete this {photo.mediaType === "video" ? "video" : "photo"}?
+            </h3>
+            <p className="mt-2 text-sm text-haze">
+              It disappears for everyone, along with its comments and reactions. The stored files
+              are removed too.
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                className="btn btn-quiet flex-1"
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+              >
+                Keep it
+              </button>
+              <button
+                type="button"
+                className="btn flex-1"
+                style={{ background: "var(--color-coral)", color: "var(--color-deep)" }}
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  const res = await fetch(`/api/photos/${photo.id}`, { method: "DELETE" });
+                  setDeleting(false);
+                  if (res.ok) {
+                    onDeleted?.(photo.id);
+                    setConfirmDelete(false);
+                  }
+                }}
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Attribution and survey data */}
       {showMeta && (

@@ -31,13 +31,18 @@ export default function DebugPage() {
   const [reports, setReports] = useState<Report[]>([]);
   const [busy, setBusy] = useState(false);
 
-  async function inspect(list: FileList | null, source: string) {
-    if (!list?.length) return;
+  async function inspect(files: File[], source: string) {
+    if (!files.length) return;
     setBusy(true);
-    const exifr = (await import("exifr")).default;
+    try {
+      var exifr = (await import("exifr")).default;
+    } catch {
+      setBusy(false);
+      return;
+    }
     const out: Report[] = [];
 
-    for (const file of Array.from(list)) {
+    for (const file of files) {
       const base = {
         name: `${file.name}  [via ${source}]`,
         type: file.type || "(none reported)",
@@ -93,7 +98,8 @@ export default function DebugPage() {
         accept="image/*,.heic,.heif"
         className="sr-only"
         onChange={(e) => {
-          void inspect(e.target.files, "photo picker");
+          // Snapshot before clearing the input — the FileList is live.
+          void inspect(Array.from(e.target.files ?? []), "photo picker");
           e.target.value = "";
         }}
       />
@@ -106,7 +112,7 @@ export default function DebugPage() {
         multiple
         className="sr-only"
         onChange={(e) => {
-          void inspect(e.target.files, "file browser");
+          void inspect(Array.from(e.target.files ?? []), "file browser");
           e.target.value = "";
         }}
       />

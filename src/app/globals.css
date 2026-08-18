@@ -29,6 +29,7 @@ html,
 body {
   height: 100%;
   overscroll-behavior: none;
+  /* background: url(/rosewallpaper.svg); */
 }
 
 body {
@@ -375,4 +376,18 @@ body {
   100% {
     transform: translateX(0) scaleX(1);
   }
+}
+
+@keyframes flash-red {
+  0%, 100% {
+    color: inherit; 
+  }
+  50% {
+    color: #ff0000; 
+  }
+}
+
+.flash-text {
+  font-size:1.2rem;
+  animation: flash-red 1s ease-in-out infinite; 
 }

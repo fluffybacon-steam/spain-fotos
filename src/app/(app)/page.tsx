@@ -15,6 +15,7 @@ export default function MapPage() {
   const [photos, setPhotos] = useState<PhotoDTO[]>([]);
   const [people, setPeople] = useState<PersonDTO[]>([]);
   const [namedPlaces, setNamedPlaces] = useState<NamedPlace[]>([]);
+  const [meId, setMeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [centre, setCentre] = useState<{ lat: number; lng: number } | null>(null);
 
@@ -33,7 +34,11 @@ export default function MapPage() {
         fetch("/api/places"),
       ]);
       if (photoRes.ok) setPhotos((await photoRes.json()).photos);
-      if (meRes.ok) setPeople((await meRes.json()).people);
+      if (meRes.ok) {
+        const data = await meRes.json();
+        setPeople(data.people);
+        setMeId(data.me?.uid ?? null);
+      }
       if (placeRes.ok) setNamedPlaces((await placeRes.json()).places);
       setLoading(false);
     })();
@@ -53,6 +58,17 @@ export default function MapPage() {
 
   const updatePhoto = useCallback((updated: PhotoDTO) => {
     setPhotos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }, []);
+
+  const removePhoto = useCallback((photoId: string) => {
+    setPhotos((prev) => prev.filter((p) => p.id !== photoId));
+    setPanel((prev) => {
+      if (!prev) return prev;
+      const ids = prev.ids.filter((id) => id !== photoId);
+      return ids.length ? { ...prev, ids } : null;
+    });
+    // Step back so the viewer never lands past the end of a shortened list.
+    setLightboxIndex((i) => (i === null ? null : Math.max(0, i - 1)));
   }, []);
 
   const openPhotos = useCallback((selection: PhotoDTO[], startIndex: number) => {
@@ -176,6 +192,8 @@ export default function MapPage() {
           index={lightboxIndex}
           onIndexChange={setLightboxIndex}
           onPhotoChange={updatePhoto}
+          meId={meId ?? undefined}
+          onDeleted={removePhoto}
           namedPlaces={allNames}
           onClose={() => {
             setLightboxIndex(null);

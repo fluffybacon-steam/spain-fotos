@@ -18,7 +18,7 @@ export default function UploadPage() {
       <Uploader />
 
       <section className="mt-12 border-t border-hairline pt-6">
-        <p className="eyebrow mb-3">If a photo won&apos;t place itself</p>
+        <p className="eyebrow mb-1 flash-text">READ ME</p>
         <ul className="flex flex-col gap-2.5 text-sm text-haze">
           <li>
             <strong className="text-foam">Send originals, not forwards.</strong> WhatsApp, Telegram
@@ -34,7 +34,7 @@ export default function UploadPage() {
             Store Location setting that has to be on at the time the photo was taken.
           </li>
           <li>
-            Screenshots and scans never had coordinates. Pin those by hand from the map.
+            Screenshots and scans never had coordinates. Pin those by hand from the map. or don't, its your life
           </li>
         </ul>
       </section>

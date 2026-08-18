@@ -5,8 +5,9 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { preparePhoto, putWithProgress, isSupportedImage, isVideo } from "@/lib/client/prepare";
 import { formatDuration } from "@/lib/client/video";
+import { contentHash } from "@/lib/client/hash";
 
-type Stage = "queued" | "reading" | "uploading" | "done" | "failed";
+type Stage = "queued" | "reading" | "uploading" | "done" | "failed" | "duplicate";
 
 type Job = {
   key: string;
@@ -18,6 +19,8 @@ type Job = {
   video: boolean;
   durationMs?: number | null;
   posterFailed?: boolean;
+  hash?: string;
+  duplicateOf?: string;
   error?: string;
 };
 
@@ -54,6 +57,24 @@ export default function Uploader() {
 
   async function runOne(job: Job) {
     patch(job.key, { stage: "reading" });
+
+    // Fingerprint before doing any work — a duplicate should cost nothing.
+    const hash = await contentHash(job.file);
+    patch(job.key, { hash });
+
+    const check = await fetch("/api/photos/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hashes: [hash] }),
+    });
+    if (check.ok) {
+      const { mine, others } = await check.json();
+      if (mine.includes(hash)) {
+        patch(job.key, { stage: "duplicate", progress: 1, duplicateOf: "you" });
+        return;
+      }
+      if (others?.[hash]) patch(job.key, { duplicateOf: others[hash] });
+    }
 
     const prepared = await preparePhoto(job.file);
     const previewUrl = URL.createObjectURL(prepared.thumb);
@@ -101,6 +122,7 @@ export default function Uploader() {
             ...slot.keys,
             mediaType: prepared.mediaType,
             durationMs: prepared.durationMs,
+            contentHash: hash,
             originalName: job.file.name,
             originalMime: slot.originalMime,
             originalBytes: job.file.size,
@@ -147,6 +169,7 @@ export default function Uploader() {
 
   const queued = jobs.filter((j) => j.stage === "queued" || j.stage === "failed").length;
   const done = jobs.filter((j) => j.stage === "done").length;
+  const skipped = jobs.filter((j) => j.stage === "duplicate").length;
   const withoutLocation = jobs.filter((j) => j.stage === "done" && !j.hasLocation).length;
 
   return (
@@ -202,6 +225,7 @@ export default function Uploader() {
           <div className="flex items-center justify-between gap-3">
             <p className="coord">
               {jobs.length} selected · {done} uploaded
+              {skipped > 0 && ` · ${skipped} already there`}
               {queued > 0 && ` · ${queued} waiting`}
             </p>
             <button
@@ -231,13 +255,18 @@ export default function Uploader() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm">{job.file.name}</p>
                   <p className="coord truncate">
-                    {job.stage === "failed"
+                    {job.stage === "duplicate"
+                      ? "Already uploaded — skipped"
+                      : job.stage === "failed"
                       ? job.error
                       : job.stage === "done"
                         ? [
                             job.video && job.durationMs ? formatDuration(job.durationMs) : null,
                             job.hasLocation ? "Placed on the map" : "No location — pin it by hand",
                             job.posterFailed ? "no preview (codec)" : null,
+                            job.duplicateOf && job.duplicateOf !== "you"
+                              ? `${job.duplicateOf} has this too`
+                              : null,
                           ]
                             .filter(Boolean)
                             .join(" · ")
@@ -258,7 +287,17 @@ export default function Uploader() {
                 </div>
 
                 <span aria-hidden="true" className="text-sm">
-                  {job.stage === "done" ? (job.video ? "🎬" : job.hasLocation ? "📍" : "❓") : job.stage === "failed" ? "⚠️" : ""}
+                  {job.stage === "duplicate"
+                    ? "⏭"
+                    : job.stage === "done"
+                      ? job.video
+                        ? "🎬"
+                        : job.hasLocation
+                          ? "📍"
+                          : "❓"
+                      : job.stage === "failed"
+                        ? "⚠️"
+                        : ""}
                 </span>
               </li>
             ))}

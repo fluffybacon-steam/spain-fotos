@@ -14,6 +14,7 @@ export default function BrowsePage() {
   const [photos, setPhotos] = useState<PhotoDTO[]>([]);
   const [people, setPeople] = useState<PersonDTO[]>([]);
   const [namedPlaces, setNamedPlaces] = useState<NamedPlace[]>([]);
+  const [meId, setMeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [who, setWho] = useState<string | null>(null); // null = everyone
   const [index, setIndex] = useState<number | null>(null);
@@ -26,7 +27,11 @@ export default function BrowsePage() {
         fetch("/api/places"),
       ]);
       if (photoRes.ok) setPhotos((await photoRes.json()).photos);
-      if (meRes.ok) setPeople((await meRes.json()).people);
+      if (meRes.ok) {
+        const data = await meRes.json();
+        setPeople(data.people);
+        setMeId(data.me?.uid ?? null);
+      }
       if (placeRes.ok) setNamedPlaces((await placeRes.json()).places);
       setLoading(false);
     })();
@@ -56,6 +61,11 @@ export default function BrowsePage() {
     }
     return [...map.entries()];
   }, [shown]);
+
+  function removePhoto(photoId: string) {
+    setPhotos((prev) => prev.filter((p) => p.id !== photoId));
+    setIndex((i) => (i === null ? null : Math.max(0, i - 1)));
+  }
 
   function updatePhoto(updated: PhotoDTO) {
     setPhotos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
@@ -155,7 +165,7 @@ export default function BrowsePage() {
                   {photo.mediaType === "video" && photo.durationMs && (
                     <span className="coord">{formatDuration(photo.durationMs)}</span>
                   )}
-                  {photo.lat === null && <span title="No location">📍</span>}
+                  {photo.lat === null && <span title="No location"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M480-80Q319-217 239.5-334.5T160-552q0-150 96.5-239T480-880q10 0 19.5.5T520-877v81q-10-2-20-3t-20-1q-101 0-170.5 69.5T240-552q0 71 59 162.5T480-186q122-112 181-203.5T720-552q0-2-.5-4t-.5-4h80q0 2 .5 4t.5 4q0 100-79.5 217.5T480-80Zm0-450Zm195-108 84-84 84 84 56-56-84-84 84-84-56-56-84 84-84-84-56 56 84 84-84 84 56 56ZM536.5-503.5Q560-527 560-560t-23.5-56.5Q513-640 480-640t-56.5 23.5Q400-593 400-560t23.5 56.5Q447-480 480-480t56.5-23.5Z"/></svg></span>}
                 </span>
               </button>
             ))}
@@ -169,6 +179,8 @@ export default function BrowsePage() {
           index={index}
           onIndexChange={setIndex}
           onPhotoChange={updatePhoto}
+          meId={meId ?? undefined}
+          onDeleted={removePhoto}
           namedPlaces={allNames}
           onClose={() => setIndex(null)}
         />

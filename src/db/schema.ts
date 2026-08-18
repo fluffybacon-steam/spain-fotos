@@ -9,6 +9,7 @@ import {
   boolean,
   primaryKey,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -39,6 +40,9 @@ export const photos = pgTable(
     mediaType: text("media_type").notNull().default("photo"),
     durationMs: integer("duration_ms"),
 
+    /** SHA-256 fingerprint of the original bytes — see lib/client/hash.ts. */
+    contentHash: text("content_hash"),
+
     originalName: text("original_name").notNull(),
     originalMime: text("original_mime").notNull(),
     originalBytes: bigint("original_bytes", { mode: "number" }).notNull(),
@@ -63,6 +67,10 @@ export const photos = pgTable(
     index("photos_owner_idx").on(t.ownerId),
     index("photos_coords_idx").on(t.lat, t.lng),
     index("photos_taken_idx").on(t.takenAt),
+    // Per-owner rather than global: two friends may legitimately both hold the
+    // same photo, and each should keep their own attribution. What this stops
+    // is one person uploading the same file twice.
+    uniqueIndex("photos_owner_hash_idx").on(t.ownerId, t.contentHash),
   ],
 );
 

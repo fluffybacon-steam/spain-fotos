@@ -1,0 +1,501 @@
+diff -ruN before/src/app/(app)/browse/page.tsx /mnt/user-data/outputs/cala-app/src/app/(app)/browse/page.tsx
+--- a/src/app/(app)/browse/page.tsx	2026-08-18 15:24:09.979765421 +0000
++++ b/src/app/(app)/browse/page.tsx	2026-08-18 15:20:47.433788917 +0000
+@@ -14,6 +14,7 @@
+   const [photos, setPhotos] = useState<PhotoDTO[]>([]);
+   const [people, setPeople] = useState<PersonDTO[]>([]);
+   const [namedPlaces, setNamedPlaces] = useState<NamedPlace[]>([]);
++  const [meId, setMeId] = useState<string | null>(null);
+   const [loading, setLoading] = useState(true);
+   const [who, setWho] = useState<string | null>(null); // null = everyone
+   const [index, setIndex] = useState<number | null>(null);
+@@ -26,7 +27,11 @@
+         fetch("/api/places"),
+       ]);
+       if (photoRes.ok) setPhotos((await photoRes.json()).photos);
+-      if (meRes.ok) setPeople((await meRes.json()).people);
++      if (meRes.ok) {
++        const data = await meRes.json();
++        setPeople(data.people);
++        setMeId(data.me?.uid ?? null);
++      }
+       if (placeRes.ok) setNamedPlaces((await placeRes.json()).places);
+       setLoading(false);
+     })();
+@@ -57,6 +62,11 @@
+     return [...map.entries()];
+   }, [shown]);
+ 
++  function removePhoto(photoId: string) {
++    setPhotos((prev) => prev.filter((p) => p.id !== photoId));
++    setIndex((i) => (i === null ? null : Math.max(0, i - 1)));
++  }
++
+   function updatePhoto(updated: PhotoDTO) {
+     setPhotos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+   }
+@@ -169,6 +179,8 @@
+           index={index}
+           onIndexChange={setIndex}
+           onPhotoChange={updatePhoto}
++          meId={meId ?? undefined}
++          onDeleted={removePhoto}
+           namedPlaces={allNames}
+           onClose={() => setIndex(null)}
+         />
+diff -ruN before/src/app/(app)/debug/page.tsx /mnt/user-data/outputs/cala-app/src/app/(app)/debug/page.tsx
+--- a/src/app/(app)/debug/page.tsx	2026-08-18 15:23:40.699571638 +0000
++++ b/src/app/(app)/debug/page.tsx	2026-08-18 15:19:34.077304464 +0000
+@@ -31,13 +31,18 @@
+   const [reports, setReports] = useState<Report[]>([]);
+   const [busy, setBusy] = useState(false);
+ 
+-  async function inspect(list: FileList | null, source: string) {
+-    if (!list?.length) return;
++  async function inspect(files: File[], source: string) {
++    if (!files.length) return;
+     setBusy(true);
+-    const exifr = (await import("exifr")).default;
++    try {
++      var exifr = (await import("exifr")).default;
++    } catch {
++      setBusy(false);
++      return;
++    }
+     const out: Report[] = [];
+ 
+-    for (const file of Array.from(list)) {
++    for (const file of files) {
+       const base = {
+         name: `${file.name}  [via ${source}]`,
+         type: file.type || "(none reported)",
+@@ -93,7 +98,8 @@
+         accept="image/*,.heic,.heif"
+         className="sr-only"
+         onChange={(e) => {
+-          void inspect(e.target.files, "photo picker");
++          // Snapshot before clearing the input — the FileList is live.
++          void inspect(Array.from(e.target.files ?? []), "photo picker");
+           e.target.value = "";
+         }}
+       />
+@@ -106,7 +112,7 @@
+         multiple
+         className="sr-only"
+         onChange={(e) => {
+-          void inspect(e.target.files, "file browser");
++          void inspect(Array.from(e.target.files ?? []), "file browser");
+           e.target.value = "";
+         }}
+       />
+diff -ruN before/src/app/(app)/page.tsx /mnt/user-data/outputs/cala-app/src/app/(app)/page.tsx
+--- a/src/app/(app)/page.tsx	2026-08-18 15:24:09.979406174 +0000
++++ b/src/app/(app)/page.tsx	2026-08-18 15:20:47.432943604 +0000
+@@ -15,6 +15,7 @@
+   const [photos, setPhotos] = useState<PhotoDTO[]>([]);
+   const [people, setPeople] = useState<PersonDTO[]>([]);
+   const [namedPlaces, setNamedPlaces] = useState<NamedPlace[]>([]);
++  const [meId, setMeId] = useState<string | null>(null);
+   const [loading, setLoading] = useState(true);
+   const [centre, setCentre] = useState<{ lat: number; lng: number } | null>(null);
+ 
+@@ -33,7 +34,11 @@
+         fetch("/api/places"),
+       ]);
+       if (photoRes.ok) setPhotos((await photoRes.json()).photos);
+-      if (meRes.ok) setPeople((await meRes.json()).people);
++      if (meRes.ok) {
++        const data = await meRes.json();
++        setPeople(data.people);
++        setMeId(data.me?.uid ?? null);
++      }
+       if (placeRes.ok) setNamedPlaces((await placeRes.json()).places);
+       setLoading(false);
+     })();
+@@ -55,6 +60,17 @@
+     setPhotos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+   }, []);
+ 
++  const removePhoto = useCallback((photoId: string) => {
++    setPhotos((prev) => prev.filter((p) => p.id !== photoId));
++    setPanel((prev) => {
++      if (!prev) return prev;
++      const ids = prev.ids.filter((id) => id !== photoId);
++      return ids.length ? { ...prev, ids } : null;
++    });
++    // Step back so the viewer never lands past the end of a shortened list.
++    setLightboxIndex((i) => (i === null ? null : Math.max(0, i - 1)));
++  }, []);
++
+   const openPhotos = useCallback((selection: PhotoDTO[], startIndex: number) => {
+     setPanel({ ids: selection.map((p) => p.id) });
+     setLightboxIndex(selection.length === 1 ? startIndex : null);
+@@ -176,6 +192,8 @@
+           index={lightboxIndex}
+           onIndexChange={setLightboxIndex}
+           onPhotoChange={updatePhoto}
++          meId={meId ?? undefined}
++          onDeleted={removePhoto}
+           namedPlaces={allNames}
+           onClose={() => {
+             setLightboxIndex(null);
+diff -ruN before/src/app/api/photos/check/route.ts /mnt/user-data/outputs/cala-app/src/app/api/photos/check/route.ts
+--- a/src/app/api/photos/check/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/photos/check/route.ts	2026-08-18 15:20:01.409715420 +0000
+@@ -0,0 +1,42 @@
++// src/app/api/photos/check/route.ts
++import { NextResponse } from "next/server";
++import { inArray, isNotNull, and } from "drizzle-orm";
++import { z } from "zod";
++import { db, photos, users } from "@/db";
++import { eq } from "drizzle-orm";
++import { requireUser, guard } from "@/lib/session";
++
++export const runtime = "nodejs";
++export const dynamic = "force-dynamic";
++
++const Body = z.object({ hashes: z.array(z.string().max(80)).min(1).max(200) });
++
++/**
++ * Asked before any bytes move. Uploading a 12 MB photo only to have the insert
++ * silently conflict wastes the uploader's data allowance and their patience, so
++ * the client checks first and skips what's already there.
++ *
++ * Also reports matches owned by *other* people — not blocked, since two friends
++ * may genuinely both hold the same photo, but worth telling the uploader.
++ */
++export const POST = guard(async (req: Request) => {
++  const me = await requireUser();
++  const parsed = Body.safeParse(await req.json().catch(() => null));
++  if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
++
++  const rows = await db
++    .select({ hash: photos.contentHash, ownerId: photos.ownerId, ownerName: users.name })
++    .from(photos)
++    .innerJoin(users, eq(users.id, photos.ownerId))
++    .where(and(isNotNull(photos.contentHash), inArray(photos.contentHash, parsed.data.hashes)));
++
++  const mine: string[] = [];
++  const others: Record<string, string> = {};
++  for (const row of rows) {
++    if (!row.hash) continue;
++    if (row.ownerId === me.uid) mine.push(row.hash);
++    else others[row.hash] = row.ownerName;
++  }
++
++  return NextResponse.json({ mine: [...new Set(mine)], others });
++});
+diff -ruN before/src/app/api/photos/route.ts /mnt/user-data/outputs/cala-app/src/app/api/photos/route.ts
+--- a/src/app/api/photos/route.ts	2026-08-18 15:23:40.700123389 +0000
++++ b/src/app/api/photos/route.ts	2026-08-18 02:53:26.103037000 +0000
+@@ -88,6 +88,7 @@
+         thumbKey: z.string().min(1),
+         mediaType: z.enum(["photo", "video"]).default("photo"),
+         durationMs: z.number().int().nonnegative().nullable().default(null),
++        contentHash: z.string().max(80).nullable().default(null),
+         originalName: z.string().min(1).max(255),
+         originalMime: z.string().max(120),
+         originalBytes: z.number().int().nonnegative(),
+@@ -126,6 +127,7 @@
+       thumbKey: r.thumbKey,
+       mediaType: r.mediaType,
+       durationMs: r.durationMs,
++      contentHash: r.contentHash,
+       originalName: r.originalName,
+       originalMime: r.originalMime,
+       originalBytes: r.originalBytes,
+diff -ruN before/src/components/Lightbox.tsx /mnt/user-data/outputs/cala-app/src/components/Lightbox.tsx
+--- a/src/components/Lightbox.tsx	2026-08-18 15:24:09.977382688 +0000
++++ b/src/components/Lightbox.tsx	2026-08-18 15:20:35.138074349 +0000
+@@ -16,6 +16,9 @@
+   onClose: () => void;
+   onPhotoChange: (photo: PhotoDTO) => void;
+   namedPlaces?: NamedPlace[];
++  /** Signed-in user id, so the owner sees a delete control. */
++  meId?: string;
++  onDeleted?: (photoId: string) => void;
+ };
+ 
+ export default function Lightbox({
+@@ -25,12 +28,16 @@
+   onClose,
+   onPhotoChange,
+   namedPlaces = [],
++  meId,
++  onDeleted,
+ }: Props) {
+   const photo = photos[index];
+   const touchStart = useRef<{ x: number; y: number } | null>(null);
+   const [showMeta, setShowMeta] = useState(true);
+   const [showComments, setShowComments] = useState(false);
+   const [playbackFailed, setPlaybackFailed] = useState(false);
++  const [confirmDelete, setConfirmDelete] = useState(false);
++  const [deleting, setDeleting] = useState(false);
+   const [commentCount, setCommentCount] = useState<number | null>(null);
+ 
+   const go = useCallback(
+@@ -80,6 +87,7 @@
+     setShowComments(false);
+     setCommentCount(null);
+     setPlaybackFailed(false);
++    setConfirmDelete(false);
+   }, [photo?.id]);
+ 
+   if (!photo) return null;
+@@ -120,6 +128,19 @@
+           </svg>
+         </button>
+ 
++        {meId && photo.ownerId === meId && (
++          <button
++            type="button"
++            className="icon-btn"
++            onClick={() => setConfirmDelete(true)}
++            aria-label="Delete this photo"
++          >
++            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
++              <path d="M3 4.4h10M6.4 4.4V2.9h3.2v1.5M4.4 4.4l.6 8.7h6l.6-8.7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
++            </svg>
++          </button>
++        )}
++
+         <a
+           className="icon-btn"
+           href={photo.downloadUrl}
+@@ -215,6 +236,48 @@
+         )}
+       </div>
+ 
++      {confirmDelete && (
++        <div className="absolute inset-0 z-10 grid place-items-center bg-deep/85 p-6">
++          <div className="glass w-full max-w-sm rounded-[4px] p-5">
++            <p className="eyebrow">This can&apos;t be undone</p>
++            <h3 className="mt-2 font-display text-xl font-bold">
++              Delete this {photo.mediaType === "video" ? "video" : "photo"}?
++            </h3>
++            <p className="mt-2 text-sm text-haze">
++              It disappears for everyone, along with its comments and reactions. The stored files
++              are removed too.
++            </p>
++            <div className="mt-5 flex gap-2">
++              <button
++                type="button"
++                className="btn btn-quiet flex-1"
++                onClick={() => setConfirmDelete(false)}
++                disabled={deleting}
++              >
++                Keep it
++              </button>
++              <button
++                type="button"
++                className="btn flex-1"
++                style={{ background: "var(--color-coral)", color: "var(--color-deep)" }}
++                disabled={deleting}
++                onClick={async () => {
++                  setDeleting(true);
++                  const res = await fetch(`/api/photos/${photo.id}`, { method: "DELETE" });
++                  setDeleting(false);
++                  if (res.ok) {
++                    onDeleted?.(photo.id);
++                    setConfirmDelete(false);
++                  }
++                }}
++              >
++                {deleting ? "Deleting…" : "Delete"}
++              </button>
++            </div>
++          </div>
++        </div>
++      )}
++
+       {/* Attribution and survey data */}
+       {showMeta && (
+         <footer className="border-t border-hairline bg-hull/70 px-4 py-3 backdrop-blur-sm">
+diff -ruN before/src/components/Uploader.tsx /mnt/user-data/outputs/cala-app/src/components/Uploader.tsx
+--- a/src/components/Uploader.tsx	2026-08-18 15:23:54.056767364 +0000
++++ b/src/components/Uploader.tsx	2026-08-18 15:20:17.448794768 +0000
+@@ -5,8 +5,9 @@
+ import { useRouter } from "next/navigation";
+ import { preparePhoto, putWithProgress, isSupportedImage, isVideo } from "@/lib/client/prepare";
+ import { formatDuration } from "@/lib/client/video";
++import { contentHash } from "@/lib/client/hash";
+ 
+-type Stage = "queued" | "reading" | "uploading" | "done" | "failed";
++type Stage = "queued" | "reading" | "uploading" | "done" | "failed" | "duplicate";
+ 
+ type Job = {
+   key: string;
+@@ -18,6 +19,8 @@
+   video: boolean;
+   durationMs?: number | null;
+   posterFailed?: boolean;
++  hash?: string;
++  duplicateOf?: string;
+   error?: string;
+ };
+ 
+@@ -55,6 +58,24 @@
+   async function runOne(job: Job) {
+     patch(job.key, { stage: "reading" });
+ 
++    // Fingerprint before doing any work — a duplicate should cost nothing.
++    const hash = await contentHash(job.file);
++    patch(job.key, { hash });
++
++    const check = await fetch("/api/photos/check", {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ hashes: [hash] }),
++    });
++    if (check.ok) {
++      const { mine, others } = await check.json();
++      if (mine.includes(hash)) {
++        patch(job.key, { stage: "duplicate", progress: 1, duplicateOf: "you" });
++        return;
++      }
++      if (others?.[hash]) patch(job.key, { duplicateOf: others[hash] });
++    }
++
+     const prepared = await preparePhoto(job.file);
+     const previewUrl = URL.createObjectURL(prepared.thumb);
+     patch(job.key, {
+@@ -101,6 +122,7 @@
+             ...slot.keys,
+             mediaType: prepared.mediaType,
+             durationMs: prepared.durationMs,
++            contentHash: hash,
+             originalName: job.file.name,
+             originalMime: slot.originalMime,
+             originalBytes: job.file.size,
+@@ -147,6 +169,7 @@
+ 
+   const queued = jobs.filter((j) => j.stage === "queued" || j.stage === "failed").length;
+   const done = jobs.filter((j) => j.stage === "done").length;
++  const skipped = jobs.filter((j) => j.stage === "duplicate").length;
+   const withoutLocation = jobs.filter((j) => j.stage === "done" && !j.hasLocation).length;
+ 
+   return (
+@@ -202,6 +225,7 @@
+           <div className="flex items-center justify-between gap-3">
+             <p className="coord">
+               {jobs.length} selected · {done} uploaded
++              {skipped > 0 && ` · ${skipped} already there`}
+               {queued > 0 && ` · ${queued} waiting`}
+             </p>
+             <button
+@@ -231,13 +255,18 @@
+                 <div className="min-w-0 flex-1">
+                   <p className="truncate text-sm">{job.file.name}</p>
+                   <p className="coord truncate">
+-                    {job.stage === "failed"
++                    {job.stage === "duplicate"
++                      ? "Already uploaded — skipped"
++                      : job.stage === "failed"
+                       ? job.error
+                       : job.stage === "done"
+                         ? [
+                             job.video && job.durationMs ? formatDuration(job.durationMs) : null,
+                             job.hasLocation ? "Placed on the map" : "No location — pin it by hand",
+                             job.posterFailed ? "no preview (codec)" : null,
++                            job.duplicateOf && job.duplicateOf !== "you"
++                              ? `${job.duplicateOf} has this too`
++                              : null,
+                           ]
+                             .filter(Boolean)
+                             .join(" · ")
+@@ -258,7 +287,17 @@
+                 </div>
+ 
+                 <span aria-hidden="true" className="text-sm">
+-                  {job.stage === "done" ? (job.video ? "🎬" : job.hasLocation ? "📍" : "❓") : job.stage === "failed" ? "⚠️" : ""}
++                  {job.stage === "duplicate"
++                    ? "⏭"
++                    : job.stage === "done"
++                      ? job.video
++                        ? "🎬"
++                        : job.hasLocation
++                          ? "📍"
++                          : "❓"
++                      : job.stage === "failed"
++                        ? "⚠️"
++                        : ""}
+                 </span>
+               </li>
+             ))}
+diff -ruN before/src/db/schema.ts /mnt/user-data/outputs/cala-app/src/db/schema.ts
+--- a/src/db/schema.ts	2026-08-18 15:23:40.699883428 +0000
++++ b/src/db/schema.ts	2026-08-18 02:52:41.558475000 +0000
+@@ -9,6 +9,7 @@
+   boolean,
+   primaryKey,
+   index,
++  uniqueIndex,
+ } from "drizzle-orm/pg-core";
+ 
+ export const users = pgTable("users", {
+@@ -39,6 +40,9 @@
+     mediaType: text("media_type").notNull().default("photo"),
+     durationMs: integer("duration_ms"),
+ 
++    /** SHA-256 fingerprint of the original bytes — see lib/client/hash.ts. */
++    contentHash: text("content_hash"),
++
+     originalName: text("original_name").notNull(),
+     originalMime: text("original_mime").notNull(),
+     originalBytes: bigint("original_bytes", { mode: "number" }).notNull(),
+@@ -63,6 +67,10 @@
+     index("photos_owner_idx").on(t.ownerId),
+     index("photos_coords_idx").on(t.lat, t.lng),
+     index("photos_taken_idx").on(t.takenAt),
++    // Per-owner rather than global: two friends may legitimately both hold the
++    // same photo, and each should keep their own attribution. What this stops
++    // is one person uploading the same file twice.
++    uniqueIndex("photos_owner_hash_idx").on(t.ownerId, t.contentHash),
+   ],
+ );
+ 
+diff -ruN before/src/lib/client/hash.ts /mnt/user-data/outputs/cala-app/src/lib/client/hash.ts
+--- a/src/lib/client/hash.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/client/hash.ts	2026-08-18 15:19:44.523936113 +0000
+@@ -0,0 +1,41 @@
++// src/lib/client/hash.ts
++
++/**
++ * Content fingerprint used to spot re-uploads of the same file.
++ *
++ * Small files are hashed whole. Videos can run to hundreds of megabytes, and
++ * pulling one into an ArrayBuffer to hash it would blow up a phone's memory —
++ * so above the threshold we hash the size plus the head and tail. Two distinct
++ * recordings sharing an exact byte length *and* identical first and last 4 MB
++ * is not a scenario worth engineering for.
++ *
++ * The mode prefix keeps the two schemes in separate namespaces, so a full hash
++ * can never collide with a sampled one.
++ */
++
++const FULL_HASH_LIMIT = 32 * 1024 * 1024;
++const SAMPLE_BYTES = 4 * 1024 * 1024;
++
++export async function contentHash(file: File): Promise<string> {
++  if (file.size <= FULL_HASH_LIMIT) {
++    return "f:" + (await sha256(await file.arrayBuffer()));
++  }
++
++  const head = await file.slice(0, SAMPLE_BYTES).arrayBuffer();
++  const tail = await file.slice(Math.max(0, file.size - SAMPLE_BYTES)).arrayBuffer();
++
++  const sizeTag = new TextEncoder().encode(String(file.size));
++  const combined = new Uint8Array(sizeTag.length + head.byteLength + tail.byteLength);
++  combined.set(sizeTag, 0);
++  combined.set(new Uint8Array(head), sizeTag.length);
++  combined.set(new Uint8Array(tail), sizeTag.length + head.byteLength);
++
++  return "s:" + (await sha256(combined.buffer as ArrayBuffer));
++}
++
++async function sha256(buffer: ArrayBuffer): Promise<string> {
++  const digest = await crypto.subtle.digest("SHA-256", buffer);
++  return Array.from(new Uint8Array(digest))
++    .map((b) => b.toString(16).padStart(2, "0"))
++    .join("");
++}
