@@ -42,6 +42,12 @@ export default function TopBar({
 
       <div className="flex-1" />
 
+      <Link href="/browse" className="hidden items-center -space-x-2 sm:flex" title="Browse everyone\u2019s photos">
+        {people.slice(0, 5).map((p) => (
+          <Avatar key={p.id} url={p.avatarUrl} name={p.name} size={26} count={p.photoCount} />
+        ))}
+      </Link>
+      
       {unplacedCount > 0 && (
         <button
           type="button"
@@ -54,18 +60,13 @@ export default function TopBar({
         </button>
       )}
 
-      <Link href="/browse" className="hidden items-center -space-x-2 sm:flex" title="Browse everyone\u2019s photos">
-        {people.slice(0, 5).map((p) => (
-          <Avatar key={p.id} url={p.avatarUrl} name={p.name} size={26} count={p.photoCount} />
-        ))}
-      </Link>
 
       <Link href="/browse" className="btn btn-quiet btn-sm sm:hidden">
         <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M360-400h400L622-580l-92 120-62-80-108 140Zm-40 160q-33 0-56.5-23.5T240-320v-480q0-33 23.5-56.5T320-880h480q33 0 56.5 23.5T880-800v480q0 33-23.5 56.5T800-240H320Zm0-80h480v-480H320v480ZM160-80q-33 0-56.5-23.5T80-160v-560h80v560h560v80H160Zm160-720v480-480Z"/></svg>
       </Link>
 
       <Link href="/upload" className="btn btn-primary btn-sm">
-        Add photos
+        Add fotos
       </Link>
 
       {/* <button type="button" className="icon-btn icon-btn-sm" onClick={signOut} aria-label="Sign out">

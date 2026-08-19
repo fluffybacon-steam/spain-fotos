@@ -23,6 +23,7 @@ export default async function LoginPage() {
         </div>
 
       </div>
+      <div style={{ position: 'fixed', left: '0px', bottom: '0px', zIndex: 1000, fontSize: '0.5rem', color: 'pink'}}>Version 0.01</div>
     </main>
   );
 }

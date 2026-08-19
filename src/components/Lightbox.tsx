@@ -239,13 +239,11 @@ export default function Lightbox({
       {confirmDelete && (
         <div className="absolute inset-0 z-10 grid place-items-center bg-deep/85 p-6">
           <div className="glass w-full max-w-sm rounded-[4px] p-5">
-            <p className="eyebrow">This can&apos;t be undone</p>
             <h3 className="mt-2 font-display text-xl font-bold">
-              Delete this {photo.mediaType === "video" ? "video" : "photo"}?
+              Delete this {photo.mediaType === "video" ? "video" : "foto"}?
             </h3>
             <p className="mt-2 text-sm text-haze">
-              It disappears for everyone, along with its comments and reactions. The stored files
-              are removed too.
+              we all make mistakes. are you sure you want to deprive everyone of this foto?
             </p>
             <div className="mt-5 flex gap-2">
               <button

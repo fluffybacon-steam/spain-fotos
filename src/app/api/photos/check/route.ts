@@ -23,6 +23,7 @@ export const POST = guard(async (req: Request) => {
   const me = await requireUser();
   const parsed = Body.safeParse(await req.json().catch((e) => console.log(e)));
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  console.log("parsed from api/check", parsed);
 
   const rows = await db
     .select({ hash: photos.contentHash, ownerId: photos.ownerId, ownerName: users.name })

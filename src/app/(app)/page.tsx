@@ -157,7 +157,7 @@ export default function MapPage() {
               Add the first photos and they&apos;ll appear wherever your camera recorded them.
             </p>
             <a href="/upload" className="btn btn-primary mt-5 w-full">
-              Add photos
+              Add fotos
             </a>
           </div>
         </div>
@@ -205,7 +205,7 @@ export default function MapPage() {
       {pinFor && (
         <div className="glass absolute inset-x-2 bottom-2 z-40 flex items-center gap-3 rounded-[4px] px-3 py-2.5">
           <p className="flex-1 text-sm">
-            Tap the map to place {pinFor.length} {pinFor.length === 1 ? "photo" : "photos"}
+            Tap the map to place {pinFor.length} {pinFor.length === 1 ? "foto" : "fotos"}
           </p>
           <button
             type="button"
@@ -245,6 +245,7 @@ export default function MapPage() {
           </div>
         </div>
       )}
+      <div style={{ position: 'fixed', left: '0px', bottom: '0px', zIndex: 1000, fontSize: '0.5rem', color: 'pink'}}>Version 0.01</div>
     </main>
   );
 }

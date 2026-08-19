@@ -9,6 +9,7 @@ import { PRESET_PLACES } from "@/lib/preset-places";
 import type { NamedPlace } from "@/lib/places";
 import { formatDuration } from "@/lib/client/video";
 import type { PersonDTO, PhotoDTO } from "@/types";
+import { set } from "zod";
 
 export default function BrowsePage() {
   const [photos, setPhotos] = useState<PhotoDTO[]>([]);
@@ -18,6 +19,7 @@ export default function BrowsePage() {
   const [loading, setLoading] = useState(true);
   const [who, setWho] = useState<string | null>(null); // null = everyone
   const [index, setIndex] = useState<number | null>(null);
+  const [totalMemory, setMemory] = useState<number | null>(0);
 
   useEffect(() => {
     (async () => {
@@ -47,6 +49,7 @@ export default function BrowsePage() {
   // Photos arrive newest-first; group them under a date heading so scrolling a
   // long trip stays legible rather than becoming an undifferentiated wall.
   const groups = useMemo(() => {
+    let group_memory = 0;
     const map = new Map<string, PhotoDTO[]>();
     for (const p of shown) {
       const key = p.takenAt
@@ -57,8 +60,12 @@ export default function BrowsePage() {
           })
         : "Date unknown";
       const list = map.get(key);
-      list ? list.push(p) : map.set(key, [p]);
+      if(p.id !== "JO_rqo26TdIVqW6R"){
+        list ? list.push(p) : map.set(key, [p]);
+      }
+      group_memory += p.originalBytes;
     }
+    setMemory(() => group_memory > 1024 * 1024 ? Math.round(group_memory / (1024 * 1024)) + " MB" : Math.round(group_memory / 1024) + " KB");
     return [...map.entries()];
   }, [shown]);
 
@@ -75,10 +82,6 @@ export default function BrowsePage() {
     <main className="mx-auto min-h-dvh w-full max-w-5xl px-3 py-5">
       <div className="mb-4 flex items-start justify-between gap-4 px-1">
         <div>
-          <p className="eyebrow">
-            {shown.length} {shown.length === 1 ? "photo" : "photos"}
-            {who && ` by ${people.find((p) => p.id === who)?.name ?? "them"}`}
-          </p>
           <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Gallery</h1>
         </div>
         <Link href="/" className="btn btn-quiet btn-sm">
@@ -87,15 +90,16 @@ export default function BrowsePage() {
       </div>
 
       {/* Who took it. Horizontally scrollable so it survives a big group. */}
-      <div className="scroll-slim -mx-1 mb-4 flex gap-1.5 overflow-x-auto px-1 pb-1">
+      <div className="scroll-slim -mx-1 mb-4 flex gap-1.5 px-1 pb-1 overflow-visible">
         <button
           type="button"
-          className="reaction shrink-0"
+          className={who === null && photos.length > 0 ? "reaction active shrink-0" : "reaction shrink-0"}
           data-mine={who === null}
           onClick={() => setWho(null)}
         >
           <span>Everyone</span>
           <span>{photos.length}</span>
+          <span className="memory" >{totalMemory}</span>
         </button>
         {people
           .filter((p) => p.photoCount > 0)
@@ -103,13 +107,14 @@ export default function BrowsePage() {
             <button
               key={person.id}
               type="button"
-              className="reaction shrink-0"
+              className={person.id === who ? "reaction active shrink-0" : "reaction shrink-0"}
               data-mine={who === person.id}
               onClick={() => setWho(person.id === who ? null : person.id)}
             >
               <Avatar url={person.avatarUrl} name={person.name} size={18} count={person.photoCount}/>
               <span className="max-w-28 truncate">{person.name}</span>
               <span>{person.photoCount}</span>
+              <span className="memory">{totalMemory}</span>
             </button>
           ))}
       </div>
@@ -123,7 +128,7 @@ export default function BrowsePage() {
             {who ? "No photos from them yet" : "No photos uploaded yet"}
           </h2>
           <Link href="/upload" className="btn btn-primary mt-4">
-            Add photos
+            Add fotos
           </Link>
         </div>
       )}

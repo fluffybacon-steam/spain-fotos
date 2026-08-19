@@ -283,6 +283,182 @@ body {
   background: var(--color-hull);
 }
 
+/* The berth being written to, and the one that just took a group. Note the
+   distinction from [data-filled] above: that's a standing state (this stop has
+   photos), these two are momentary — the write in flight and its acknowledgement. */
+.berth[data-busy="true"] {
+  border-style: solid;
+  border-color: var(--color-shoal);
+  animation: berth-working 900ms ease-in-out infinite;
+}
+.berth[data-just-filed="true"] {
+  animation: berth-took 620ms ease-out;
+}
+.berth:disabled {
+  opacity: 0.4;
+  cursor: progress;
+}
+
+@keyframes berth-working {
+  0%,
+  100% {
+    background: color-mix(in srgb, var(--color-shoal) 6%, transparent);
+  }
+  50% {
+    background: color-mix(in srgb, var(--color-shoal) 20%, transparent);
+  }
+}
+/* A ring pushed outward and dropped — the slot closing on the prints. */
+@keyframes berth-took {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-shoal) 60%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+
+/* The stop grid stays legible but recedes until prints are selected, so the
+   two steps read in order rather than as one wall of controls. */
+.place-picker {
+  opacity: 1;
+  transition: opacity 250ms linear;
+}
+.place-picker[data-armed="false"] {
+  opacity: 0.5;
+}
+
+/* A sounding line: how much of the roll has been filed. Fills left to right,
+   one hairline thick, because it's a reading rather than a decoration. */
+.filed-progress {
+  height: 2px;
+  width: 100%;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-hairline) 65%, transparent);
+}
+.filed-progress > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--color-shoal);
+  transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* The one line that always says what just happened: filing, filed, or idle.
+   The lamp carries the state; the text carries the detail. */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 16px;
+}
+.status-line .status-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+}
+.status-line[data-tone="busy"] {
+  color: var(--color-haze);
+}
+.status-line[data-tone="busy"] .status-dot {
+  opacity: 1;
+  animation: status-working 900ms ease-in-out infinite;
+}
+.status-line[data-tone="ok"] {
+  color: var(--color-shoal);
+}
+.status-line[data-tone="ok"] .status-dot {
+  opacity: 1;
+  animation: status-struck 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.status-line[data-tone="warn"] {
+  color: var(--color-buoy);
+}
+.status-line[data-tone="warn"] .status-dot {
+  opacity: 1;
+}
+
+@keyframes status-working {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+@keyframes status-struck {
+  from {
+    transform: scale(0.2);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+/* The receipt. Each filed photo keeps its print, shrunk to a tab, so the pile
+   visibly moves from the table into the index rather than just disappearing. */
+.filed-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.filed-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px 3px 3px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-tile);
+  background: color-mix(in srgb, var(--color-hull) 60%, transparent);
+  animation: chip-filed 300ms ease-out both;
+}
+.filed-chip img {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 1px;
+  background: var(--color-foam);
+  border-radius: 2px;
+  object-fit: cover;
+  display: block;
+}
+
+@keyframes chip-filed {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Nothing left on the table. The only moment the panel's own edge lights up. */
+.place-board[data-complete="true"] {
+  border-color: color-mix(in srgb, var(--color-shoal) 45%, transparent);
+}
+
+/* The global reduced-motion rule collapses durations to 0.01ms, which turns
+   these two infinite loops into a strobe rather than calming them. Same fix as
+   the emoji sky: stop them outright and hold the lit state. */
+@media (prefers-reduced-motion: reduce) {
+  .berth[data-busy="true"],
+  .status-line[data-tone="busy"] .status-dot {
+    animation: none !important;
+  }
+  .berth[data-busy="true"] {
+    background: color-mix(in srgb, var(--color-shoal) 16%, transparent);
+  }
+}
+
 /* ── Lightbox ─────────────────────────────────────────────────────────── */
 .lightbox-backdrop {
   position: fixed;
@@ -310,6 +486,7 @@ body {
   touch-action: pan-y pinch-zoom;
 }
 .lightbox-stage img {
+  position: absolute;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
@@ -337,6 +514,7 @@ body {
 
 /* Reaction chips: the emoji is the label, the count is the data. */
 .reaction {
+  position:relative;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -353,6 +531,19 @@ body {
     transform 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
     border-color 120ms ease,
     background 120ms ease;
+  .memory{
+    z-index: -1;
+    position: absolute;
+    bottom: 0px;
+    left: 50%;
+    translate: -50% 0em;
+    clip-path: xywh(0px 2em 100% 100%);
+    transition: translate 520ms ease, clip-path 520ms ease;
+  }
+}
+.reaction.active .memory{
+  translate: -50% 2em;
+  clip-path: xywh(0px 0em 100% 100%);
 }
 .reaction:hover {
   transform: translateY(-2px);
@@ -553,5 +744,59 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .emoji-sky {
     display: none;
+  }
+}
+
+/* Jobs for fotos */
+li[data-stage="duplicate"] {
+  filter:grayscale(100%);
+}
+
+/* Append inside the ── Sorting table ── section of globals.css, after
+   .print[data-lifted="true"]. */
+
+/* A print that hasn't come out of the developer yet: the video is queued and
+   its poster is still being pulled. Blank emulsion, not a spinner — the wait is
+   a few hundred milliseconds and a spinner would be louder than the event. */
+.slug {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 1px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-hull-hi) 90%, var(--color-foam)) 0%,
+    var(--color-hull-hi) 100%
+  );
+  background-size: 100% 200%;
+  animation: slug-develop 1.6s ease-in-out infinite alternate;
+}
+
+/* Clips carry a sprocket mark so the tile still says "video" before the frame
+   lands, matching the .pin-play badge on the chart. */
+.slug[data-video="true"]::after {
+  content: "▸";
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--color-haze);
+}
+
+@keyframes slug-develop {
+  from {
+    background-position: 0 0%;
+  }
+  to {
+    background-position: 0 100%;
+  }
+}
+
+/* The global reduced-motion rule would strobe this loop rather than settle it. */
+@media (prefers-reduced-motion: reduce) {
+  .slug {
+    animation: none !important;
+    background: var(--color-hull-hi);
   }
 }

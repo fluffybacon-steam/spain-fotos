@@ -1,11 +1,12 @@
 "use client";
 // src/components/Uploader.tsx
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { preparePhoto, putWithProgress, isSupportedImage, isVideo } from "@/lib/client/prepare";
 import { formatDuration } from "@/lib/client/video";
 import { contentHash } from "@/lib/client/hash";
+import { posterFromVideo } from "@/lib/video-poster";
 import PlaceBoard, { type PlaceableItem } from "@/components/PlaceBoard";
 
 type Stage = "queued" | "reading" | "uploading" | "done" | "failed" | "duplicate";
@@ -18,6 +19,7 @@ type Job = {
   hasLocation: boolean;
   /** Row id minted at presign time — needed to place the photo afterwards. */
   photoId?: string;
+  /** Null until a video's poster frame is pulled, and if it can't be. */
   preview: string | null;
   video: boolean;
   durationMs?: number | null;
@@ -31,37 +33,183 @@ type Job = {
 // phone doesn't run out of memory decoding several 48-megapixel HEICs at once.
 const CONCURRENCY = 2;
 
+/** How long a delete stays armed before it disarms itself. */
+const CONFIRM_MS = 4000;
+
 export default function Uploader() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const browseRef = useRef<HTMLInputElement>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
+  const [removing, setRemoving] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [boardOpen, setBoardOpen] = useState(false);
+
+  /** Every blob URL this component minted, so none of them outlive it. */
+  const owned = useRef(new Set<string>());
+  /** Jobs still on screen. A poster arriving for a removed job is binned. */
+  const live = useRef(new Set<string>());
+  /** Cancels in-flight frame extraction when the page goes away. */
+  const abort = useRef<AbortController | null>(null);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    abort.current = new AbortController();
+    const urls = owned.current;
+    const controller = abort.current;
+    return () => {
+      controller.abort();
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+      urls.forEach((u) => URL.revokeObjectURL(u));
+      urls.clear();
+    };
+  }, []);
+
+  // The board has to survive its own success. Once every photo is placed,
+  // `placeable` empties — and if that unmounted PlaceBoard, its "all filed"
+  // state would go with it. Open it once, then only hide it.
+  useEffect(() => {
+    if (placeable.length) setBoardOpen(true);
+    else if (!jobs.length) setBoardOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
+
+  function track(url: string) {
+    owned.current.add(url);
+    return url;
+  }
+
+  function release(url: string | null | undefined) {
+    if (url && owned.current.delete(url)) URL.revokeObjectURL(url);
+  }
 
   function patch(key: string, changes: Partial<Job>) {
-    console.log("patch");
     setJobs((prev) => prev.map((j) => (j.key === key ? { ...j, ...changes } : j)));
   }
 
+  /** Drops a job from the list. Local only — nothing server-side. */
+  function drop(job: Job) {
+    live.current.delete(job.key);
+    release(job.preview);
+    setConfirming((c) => (c === job.key ? null : c));
+    setJobs((prev) => prev.filter((j) => j.key !== job.key));
+  }
+
+  /**
+   * Removing a job that already uploaded has to delete the photo, not just
+   * hide the row. Otherwise the file stays in storage and on the map with no
+   * coordinates and no way back to it — the row was the only handle on it.
+   */
+  async function removeJob(key: string) {
+    const job = jobs.find((j) => j.key === key);
+    if (!job || job.stage === "uploading" || job.stage === "reading") return;
+
+    // Queued, failed and duplicate rows never became photos. Dropping is all
+    // there is to do.
+    if (job.stage !== "done" || !job.photoId) {
+      drop(job);
+      return;
+    }
+
+    setRemoving((prev) => new Set(prev).add(key));
+    patch(key, { error: undefined });
+
+    try {
+      const res = await fetch("/api/photos", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [job.photoId] }),
+      });
+      if (!res.ok) throw new Error(`Couldn't delete this (${res.status})`);
+
+      // Same contract as /api/photos/location: the server says what it acted
+      // on, and that's what the list believes.
+      const { deleted } = (await res.json()) as { deleted: string[] };
+      if (!deleted?.includes(job.photoId)) {
+        throw new Error("The server kept this one — reload and try again");
+      }
+
+      drop(job);
+      router.refresh();
+    } catch (err) {
+      patch(key, {
+        error: err instanceof Error ? err.message : "Couldn't delete this",
+      });
+      setConfirming(null);
+    } finally {
+      setRemoving((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  }
+
+  /** First tap on an uploaded row arms the delete; the second one does it. */
+  function armDelete(key: string) {
+    setConfirming(key);
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    confirmTimer.current = setTimeout(() => setConfirming(null), CONFIRM_MS);
+  }
+
   function addFiles(list: FileList | null) {
-    console.log("addFiles");
     if (!list) return;
-    const incoming = Array.from(list)
+    const stamp = Date.now();
+
+    const incoming: Job[] = Array.from(list)
       .filter(isSupportedImage)
-      .map((file, i) => ({
-        key: `${Date.now()}-${i}-${file.name}`,
-        file,
-        stage: "queued" as Stage,
-        progress: 0,
-        hasLocation: false,
-        preview: null,
-        video: isVideo(file),
-      }));
+      .map((file, i) => {
+        const video = isVideo(file);
+        return {
+          key: `${stamp}-${i}-${file.name}`,
+          file,
+          stage: "queued" as Stage,
+          progress: 0,
+          hasLocation: false,
+          // An <img> has no video decoder, so an object URL for a clip renders
+          // as a broken tile. Clips get a poster frame a moment later instead.
+          preview: video ? null : track(URL.createObjectURL(file)),
+          video,
+        };
+      });
+
+    if (!incoming.length) return;
+    incoming.forEach((j) => live.current.add(j.key));
     setJobs((prev) => [...prev, ...incoming]);
+    void fillPosters(incoming);
+  }
+
+  /**
+   * Pulls the first usable frame out of each queued clip.
+   *
+   * Sequential on purpose: every extraction holds a decoder open, and a phone
+   * handed thirty clips at once drops the tab rather than queueing them.
+   */
+  async function fillPosters(rows: Job[]) {
+    for (const row of rows) {
+      if (!row.video || !live.current.has(row.key)) continue;
+
+      const poster = await posterFromVideo(row.file, {
+        maxEdge: 320,
+        signal: abort.current?.signal,
+      });
+
+      if (!poster) {
+        patch(row.key, { posterFailed: true });
+        continue;
+      }
+      if (!live.current.has(row.key)) {
+        URL.revokeObjectURL(poster.url); // the row left while we were decoding
+        continue;
+      }
+
+      track(poster.url);
+      patch(row.key, { preview: poster.url, posterFailed: false });
+    }
   }
 
   async function runOne(job: Job) {
-    console.log("runOne");
     patch(job.key, { stage: "reading" });
 
     // Fingerprint before doing any work — a duplicate should cost nothing.
@@ -73,8 +221,6 @@ export default function Uploader() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hashes: [hash] }),
     });
-    console.log('check', check);
-    console.log(await check.json());
     if (check.ok) {
       const { mine, others } = await check.json();
       if (mine.includes(hash)) {
@@ -85,9 +231,7 @@ export default function Uploader() {
     }
 
     const prepared = await preparePhoto(job.file);
-    const previewUrl = URL.createObjectURL(prepared.thumb);
     patch(job.key, {
-      preview: previewUrl,
       hasLocation: prepared.exif.lat !== null,
       durationMs: prepared.durationMs,
       posterFailed: prepared.posterFailed,
@@ -153,7 +297,6 @@ export default function Uploader() {
   }
 
   async function start() {
-    console.log("start()");
     setRunning(true);
     const pending = jobs.filter((j) => j.stage === "queued" || j.stage === "failed");
     const queue = [...pending];
@@ -184,7 +327,7 @@ export default function Uploader() {
 
   // Only uploads that finished, kept no coordinates, and have both a row id and
   // a thumbnail already in memory. The preview is a blob URL from the resize
-  // step, so the board costs no extra network.
+  // step — or, for clips, the extracted poster — so the board costs no network.
   const placeable: PlaceableItem[] = jobs
     .filter((j) => j.stage === "done" && !j.hasLocation && j.photoId && j.preview)
     .map((j) => ({ id: j.photoId!, thumbUrl: j.preview!, label: j.file.name }));
@@ -223,17 +366,6 @@ export default function Uploader() {
         className="grid place-items-center rounded-[4px] border border-dashed border-hairline bg-hull/50 px-6 py-10 text-center transition-colors hover:border-shoal"
       >
         <span className="font-display text-xl font-bold">Choose fotos/vids</span>
-        <span className="mt-1.5 text-sm text-haze">
-          Click or drop into 🌋
-        </span>
-      </button>
-
-      <button
-        type="button"
-        onClick={() => browseRef.current?.click()}
-        className="coord underline underline-offset-2 hover:text-foam"
-      >
-        On Android and losing locations? Browse files instead
       </button>
 
       {jobs.length > 0 && (
@@ -258,13 +390,14 @@ export default function Uploader() {
             {jobs.map((job) => (
               <li
                 key={job.key}
+                data-stage={job.stage}
                 className="flex items-center gap-3 rounded-[3px] border border-hairline bg-hull px-2.5 py-2"
               >
-                <div className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-[2px] bg-hull-hi">
+                <div className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-[2px] bg-hull-hi">
                   {job.preview ? (
                     <img src={job.preview} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    <span className="coord">•••</span>
+                    <span className="slug" data-video={job.video ? "true" : "false"} />
                   )}
                 </div>
 
@@ -300,11 +433,14 @@ export default function Uploader() {
                       />
                     </div>
                   )}
+                  {job.stage === "done" && job.error && (
+                    <p className="mt-0.5 truncate text-xs text-coral">{job.error}</p>
+                  )}
                 </div>
 
-                <span aria-hidden="true" className="text-sm">
+                <span aria-hidden="true" className="text-md">
                   {job.stage === "duplicate"
-                    ? "⏭"
+                    ? ""
                     : job.stage === "done"
                       ? job.video
                         ? "🎬"
@@ -315,19 +451,56 @@ export default function Uploader() {
                         ? "⚠️"
                         : ""}
                 </span>
+
+                <button
+                  type="button"
+                  className="shrink-0 pl-1 text-sm"
+                  disabled={
+                    job.stage === "uploading" || job.stage === "reading" || removing.has(job.key)
+                  }
+                  aria-label={
+                    job.stage === "done" && job.photoId
+                      ? confirming === job.key
+                        ? `Delete ${job.file.name} from the trip`
+                        : `Remove ${job.file.name} — this deletes it`
+                      : `Remove ${job.file.name}`
+                  }
+                  onClick={() => {
+                    // Uploaded rows are a real deletion, so they take two taps.
+                    if (job.stage === "done" && job.photoId && confirming !== job.key) {
+                      armDelete(job.key);
+                      return;
+                    }
+                    void removeJob(job.key);
+                  }}
+                >
+                  {removing.has(job.key) ? (
+                    <span className="coord">…</span>
+                  ) : confirming === job.key ? (
+                    <span className="text-xs font-bold text-coral">Delete?</span>
+                  ) : (
+                    "❌"
+                  )}
+                </button>
               </li>
             ))}
           </ul>
 
-          {placeable.length > 0 && !running && (
-            <PlaceBoard
-              items={placeable}
-              onPlaced={(ids) =>
-                setJobs((prev) =>
-                  prev.map((j) => (j.photoId && ids.includes(j.photoId) ? { ...j, hasLocation: true } : j)),
-                )
-              }
-            />
+          {/* Hidden rather than unmounted: PlaceBoard's record of what it filed
+              is the confirmation, and it can't survive being torn down. */}
+          {boardOpen && (
+            <div hidden={running}>
+              <PlaceBoard
+                items={placeable}
+                onPlaced={(ids) =>
+                  setJobs((prev) =>
+                    prev.map((j) =>
+                      j.photoId && ids.includes(j.photoId) ? { ...j, hasLocation: true } : j,
+                    ),
+                  )
+                }
+              />
+            </div>
           )}
 
           {withoutLocation > 0 && !running && (

@@ -1,7 +1,7 @@
 "use client";
 // src/components/PlaceBoard.tsx
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PRESET_PLACES } from "@/lib/preset-places";
 
 export type PlaceableItem = {
@@ -13,10 +13,29 @@ export type PlaceableItem = {
   label: string;
 };
 
-type Assignment = { placeName: string };
+/**
+ * What a print looked like at the moment it was filed.
+ *
+ * This is a copy, not a lookup into `items`, and that's the whole point. The
+ * parent is free to drop a photo from `items` once it's placed — and when it
+ * does, deriving the receipt from `items` loses every trace of the placement:
+ * the "Filed" list comes back empty, and once the last print goes, the
+ * `items.length` bail-out returns null before "All filed !" can ever render.
+ * The confirmation has to outlive the input list.
+ */
+type FiledRecord = {
+  id: string;
+  label: string;
+  thumbUrl: string;
+  placeId: string;
+  placeName: string;
+};
 
 /** Pointer travel before a press becomes a drag rather than a tap. */
 const DRAG_THRESHOLD = 8;
+
+/** How long the "filed to X" line stays up before falling back to idle copy. */
+const RECEIPT_MS = 4000;
 
 type PointerState = {
   pointerId: number;
@@ -26,6 +45,8 @@ type PointerState = {
   ids: string[];
   dragging: boolean;
 };
+
+type Tone = "idle" | "busy" | "ok" | "warn";
 
 /**
  * Files freshly uploaded photos into the trip's stops.
@@ -45,21 +66,41 @@ export default function PlaceBoard({
   items: PlaceableItem[];
   onPlaced?: (ids: string[]) => void;
 }) {
-  const [assigned, setAssigned] = useState<Record<string, Assignment>>({});
+  const [filed, setFiled] = useState<FiledRecord[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drag, setDrag] = useState<{ ids: string[]; x: number; y: number; thumbUrl: string } | null>(
     null,
   );
   const [overPlace, setOverPlace] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [working, setWorking] = useState<{ id: string; name: string; count: number } | null>(null);
+  const [receipt, setReceipt] = useState<{ placeId: string; placeName: string; count: number } | null>(
+    null,
+  );
+  const [nudge, setNudge] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const pointer = useRef<PointerState | null>(null);
   const berths = useRef(new Map<string, HTMLButtonElement | null>());
   const rects = useRef<{ id: string; rect: DOMRect }[]>([]);
+  const receiptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const pending = items.filter((i) => !assigned[i.id]);
-  const doneCount = items.length - pending.length;
+  useEffect(
+    () => () => {
+      if (receiptTimer.current) clearTimeout(receiptTimer.current);
+    },
+    [],
+  );
+
+  const busy = working !== null;
+
+  // Everything below is derived from `filed`, never from `items`, so the counts
+  // hold up whether the parent keeps placed photos in the list or prunes them.
+  const filedIds = useMemo(() => new Set(filed.map((f) => f.id)), [filed]);
+  const pending = useMemo(() => items.filter((i) => !filedIds.has(i.id)), [items, filedIds]);
+  const total = pending.length + filed.length;
+  const stopCount = useMemo(() => new Set(filed.map((f) => f.placeId)).size, [filed]);
+  const selectionCount = selected.size;
+  const complete = total > 0 && pending.length === 0;
 
   /** Measured once per drag: the berths can't move while a pointer is captured. */
   const measure = useCallback(() => {
@@ -81,42 +122,63 @@ export default function PlaceBoard({
       const place = PRESET_PLACES.find((p) => p.id === placeId);
       if (!place || !ids.length) return;
 
-      setBusy(true);
+      if (receiptTimer.current) clearTimeout(receiptTimer.current);
+      setNudge(false);
       setError(null);
+      setReceipt(null);
+      setWorking({ id: place.id, name: place.name, count: ids.length });
+
       try {
         const res = await fetch("/api/photos/location", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids, lat: place.lat, lng: place.lng }),
         });
-        if (!res.ok) throw new Error(`Couldn't place these (${res.status})`);
+        if (!res.ok) throw new Error(`Couldn't file these (${res.status})`);
 
         // Trust the server's list rather than the request: it decides what the
         // permission rule actually allowed.
         const { updated } = (await res.json()) as { updated: string[] };
-        if (!updated?.length) throw new Error("Nothing was placed — try reloading");
+        if (!updated?.length) throw new Error("Nothing was filed — reload and try again");
 
-        setAssigned((prev) => {
-          const next = { ...prev };
-          for (const id of updated) next[id] = { placeName: place.name };
-          return next;
+        // Snapshot the prints now, while they're still in `items`.
+        const byId = new Map(items.map((i) => [i.id, i]));
+        const records: FiledRecord[] = updated.map((id) => {
+          const item = byId.get(id);
+          return {
+            id,
+            label: item?.label ?? id,
+            thumbUrl: item?.thumbUrl ?? "",
+            placeId: place.id,
+            placeName: place.name,
+          };
+        });
+
+        setFiled((prev) => {
+          const seen = new Set(prev.map((f) => f.id));
+          return [...prev, ...records.filter((r) => !seen.has(r.id))];
         });
         setSelected((prev) => {
           const next = new Set(prev);
           for (const id of updated) next.delete(id);
           return next;
         });
+        setReceipt({ placeId: place.id, placeName: place.name, count: records.length });
+        receiptTimer.current = setTimeout(() => setReceipt(null), RECEIPT_MS);
+
+        // Last, so the parent can prune `items` without racing the snapshot above.
         onPlaced?.(updated);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Couldn't place these");
+        setError(err instanceof Error ? err.message : "Couldn't file these");
       } finally {
-        setBusy(false);
+        setWorking(null);
       }
     },
-    [onPlaced],
+    [items, onPlaced],
   );
 
   function toggle(id: string) {
+    setNudge(false);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -147,6 +209,7 @@ export default function PlaceBoard({
     if (!p.dragging) {
       if (Math.hypot(e.clientX - p.startX, e.clientY - p.startY) < DRAG_THRESHOLD) return;
       p.dragging = true;
+      setNudge(false);
       measure();
       const item = items.find((i) => i.id === p.itemId);
       setDrag({ ids: p.ids, x: e.clientX, y: e.clientY, thumbUrl: item?.thumbUrl ?? "" });
@@ -179,100 +242,154 @@ export default function PlaceBoard({
     setOverPlace(null);
   }
 
-  if (!items.length) return null;
+  // Only bail out when there is genuinely nothing to say — not the moment the
+  // parent hands back an empty list because everything got filed.
+  if (!items.length && !filed.length) return null;
 
-  const selectionCount = selected.size;
+  const status: { tone: Tone; text: string } = working
+    ? { tone: "busy", text: `Filing ${working.count} to ${working.name}…` }
+    : receipt
+      ? {
+          tone: "ok",
+          text: `Filed ${receipt.count} ${receipt.count === 1 ? "foto" : "fotos"} to ${receipt.placeName}`,
+        }
+      : nudge
+        ? { tone: "warn", text: "Select at least one foto first" }
+        : complete
+          ? {
+              tone: "ok",
+              text: `All ${total} filed across ${stopCount} ${stopCount === 1 ? "stop" : "stops"}`,
+            }
+          : selectionCount
+            ? { tone: "idle", text: `${selectionCount} selected — now pick a stop` }
+            : { tone: "idle", text: "Nothing selected" };
 
   return (
-    <section className="flex flex-col gap-4 rounded-[3px] border border-hairline bg-hull/50 p-4">
+    <section
+      className="place-board flex flex-col gap-4 rounded-[3px] border border-hairline bg-hull/50 p-4"
+      data-complete={complete ? "true" : "false"}
+      aria-busy={busy}
+    >
       <div>
         <p className="eyebrow">Sorting table</p>
         <h2 className="mt-1 font-display text-lg font-bold">
-          {pending.length ? `${pending.length} to file` : "All filed"}
+          {pending.length ? `${pending.length} to file` : "All filed !"}
         </h2>
-        <p className="coord mt-1.5 normal-case tracking-normal">
-          {pending.length
-            ? "Tap prints, then tap a stop. Or drag one across."
-            : "Every photo from this batch is on the chart."}
-        </p>
+        {total > 0 && (
+          <>
+            <div className="filed-progress mt-2" aria-hidden="true">
+              <span style={{ width: `${(filed.length / total) * 100}%` }} />
+            </div>
+            <p className="coord mt-1.5 normal-case tracking-normal">
+              {filed.length} of {total} placed
+            </p>
+          </>
+        )}
       </div>
 
       {pending.length > 0 && (
-        <div className="flex flex-wrap gap-2.5 py-1">
-          {pending.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="print"
-              aria-pressed={selected.has(item.id)}
-              aria-label={`${item.label}${selected.has(item.id) ? " — selected" : ""}`}
-              data-lifted={drag?.ids.includes(item.id) ? "true" : "false"}
-              onPointerDown={(e) => onPointerDown(e, item.id)}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerCancel}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggle(item.id);
-                }
-              }}
-            >
-              <img src={item.thumbUrl} alt="" />
-            </button>
-          ))}
-        </div>
+        <>
+          <h3 className="mt-1 font-display text-lg pb-2">
+            First: Select fotos you want to group to a location (click/tap)
+          </h3>
+          <div className="flex flex-wrap gap-2.5 py-1">
+            {pending.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="print"
+                aria-pressed={selected.has(item.id)}
+                aria-label={`${item.label}${selected.has(item.id) ? " — selected" : ""}`}
+                data-lifted={drag?.ids.includes(item.id) ? "true" : "false"}
+                onPointerDown={(e) => onPointerDown(e, item.id)}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerCancel}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggle(item.id);
+                  }
+                }}
+              >
+                <img src={item.thumbUrl} alt="" />
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
       {pending.length > 0 && (
-        <div className="grid grid-cols-2 gap-2">
-          {PRESET_PLACES.map((place) => (
-            <button
-              key={place.id}
-              type="button"
-              className="berth"
-              disabled={busy}
-              data-over={overPlace === place.id ? "true" : "false"}
-              ref={(el) => {
-                berths.current.set(place.id, el);
-              }}
-              onClick={() => {
-                if (selectionCount) void assign(place.id, [...selected]);
-              }}
-            >
-              <span className="font-display text-sm font-bold leading-tight">{place.name}</span>
-              <span className="coord">
-                {Math.abs(place.lat).toFixed(3)}°{place.lat >= 0 ? "N" : "S"}{" "}
-                {Math.abs(place.lng).toFixed(3)}°{place.lng >= 0 ? "E" : "W"}
-              </span>
-            </button>
-          ))}
+        <div className="place-picker" data-armed={selectionCount > 0 ? "true" : "false"}>
+          <h3 className="mt-1 font-display text-lg pb-4">
+            Second: Select a location to send your group of fotos to
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            {PRESET_PLACES.map((place) => (
+              <button
+                key={place.id}
+                type="button"
+                className="berth"
+                disabled={busy && working?.id !== place.id}
+                data-over={overPlace === place.id ? "true" : "false"}
+                data-busy={working?.id === place.id ? "true" : "false"}
+                data-just-filed={receipt?.placeId === place.id ? "true" : "false"}
+                ref={(el) => {
+                  berths.current.set(place.id, el);
+                }}
+                onClick={() => {
+                  if (busy) return;
+                  if (!selectionCount) {
+                    setNudge(true);
+                    return;
+                  }
+                  void assign(place.id, [...selected]);
+                }}
+              >
+                <span className="font-display text-sm font-bold leading-tight">{place.name}</span>
+                <span className="coord">
+                  {Math.abs(place.lat).toFixed(3)}°{place.lat >= 0 ? "N" : "S"}{" "}
+                  {Math.abs(place.lng).toFixed(3)}°{place.lng >= 0 ? "E" : "W"}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
-      {pending.length > 0 && (
-        <p className="coord normal-case tracking-normal">
-          {busy
-            ? "Placing…"
-            : selectionCount
-              ? `${selectionCount} selected — tap a stop above`
-              : "Nothing selected"}
+      {/* Outside the pending guard: the last placement's confirmation has to
+          survive the moment the print row empties out. */}
+      <p className="status-line coord normal-case tracking-normal" data-tone={status.tone} role="status">
+        <span className="status-dot" aria-hidden="true" />
+        {status.text}
+      </p>
+
+      {error && (
+        <p className="text-sm text-coral" role="alert">
+          {error}
         </p>
       )}
 
-      {error && <p className="text-sm text-coral">{error}</p>}
-
-      {doneCount > 0 && (
-        <div className="flex flex-col gap-1.5 border-t border-hairline pt-3">
+      {filed.length > 0 && (
+        <div className="flex flex-col gap-2 border-t border-hairline pt-3">
           <p className="eyebrow">Filed</p>
-          <ul className="flex flex-wrap gap-x-3 gap-y-1">
-            {items
-              .filter((i) => assigned[i.id])
-              .map((i) => (
-                <li key={i.id} className="coord normal-case tracking-normal">
-                  <span className="text-shoal">{assigned[i.id].placeName}</span> · {i.label}
-                </li>
-              ))}
+          <ul className="filed-strip">
+            {filed.map((f) => (
+              <li key={f.id} className="filed-chip">
+                {f.thumbUrl && (
+                  <img
+                    src={f.thumbUrl}
+                    alt=""
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                  />
+                )}
+                <span className="coord normal-case tracking-normal">
+                  <span className="text-shoal">{f.placeName}</span> · {f.label}
+                </span>
+              </li>
+            ))}
           </ul>
           <p className="coord mt-1">
             Placed by hand, so the map labels these as estimates. Move any of them from the map.
