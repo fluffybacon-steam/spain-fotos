@@ -39,10 +39,12 @@ export default function Uploader() {
   const [running, setRunning] = useState(false);
 
   function patch(key: string, changes: Partial<Job>) {
+    console.log("patch");
     setJobs((prev) => prev.map((j) => (j.key === key ? { ...j, ...changes } : j)));
   }
 
   function addFiles(list: FileList | null) {
+    console.log("addFiles");
     if (!list) return;
     const incoming = Array.from(list)
       .filter(isSupportedImage)
@@ -59,6 +61,7 @@ export default function Uploader() {
   }
 
   async function runOne(job: Job) {
+    console.log("runOne");
     patch(job.key, { stage: "reading" });
 
     // Fingerprint before doing any work — a duplicate should cost nothing.
@@ -70,6 +73,8 @@ export default function Uploader() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hashes: [hash] }),
     });
+    console.log('check', check);
+    console.log(await check.json());
     if (check.ok) {
       const { mine, others } = await check.json();
       if (mine.includes(hash)) {
@@ -148,6 +153,7 @@ export default function Uploader() {
   }
 
   async function start() {
+    console.log("start()");
     setRunning(true);
     const pending = jobs.filter((j) => j.stage === "queued" || j.stage === "failed");
     const queue = [...pending];

@@ -34,6 +34,7 @@ export function isVideo(file: File) {
 }
 
 export function isSupportedImage(file: File) {
+  console.log("file",file);
   return file.type.startsWith("image/") || isHeicLike(file) || isVideo(file);
 }
 

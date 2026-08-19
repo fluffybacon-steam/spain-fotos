@@ -21,7 +21,7 @@ const Body = z.object({ hashes: z.array(z.string().max(80)).min(1).max(200) });
  */
 export const POST = guard(async (req: Request) => {
   const me = await requireUser();
-  const parsed = Body.safeParse(await req.json().catch(() => null));
+  const parsed = Body.safeParse(await req.json().catch((e) => console.log(e)));
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
 
   const rows = await db

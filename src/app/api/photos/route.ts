@@ -114,6 +114,7 @@ export const POST = guard(async (req: Request) => {
   const me = await requireUser();
   const parsed = CreateBody.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  console.log("post /api/photos", parsed);
 
   const rows = parsed.data.records
     // Keys are namespaced by user id at presign time; re-check so a crafted

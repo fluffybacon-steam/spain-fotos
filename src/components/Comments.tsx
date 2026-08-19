@@ -38,6 +38,7 @@ export default function Comments({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photoId]);
 
+
   async function send() {
     const body = draft.trim();
     if (!body || sending) return;
@@ -53,9 +54,9 @@ export default function Comments({
         const { comment } = await res.json();
         setItems((prev) => {
           const next = [...prev, comment];
-          onCountChange?.(next.length);
           return next;
-        });
+        })
+        onCountChange?.(items.length);
         requestAnimationFrame(() => endRef.current?.scrollIntoView({ behavior: "smooth" }));
       } else {
         setDraft(body); // hand the text back rather than losing it
@@ -69,7 +70,7 @@ export default function Comments({
     const before = items;
     setItems((prev) => {
       const next = prev.filter((c) => c.id !== id);
-      onCountChange?.(next.length);
+      // onCountChange?.(next.length);
       return next;
     });
     const res = await fetch(`/api/comments/${id}`, { method: "DELETE" });

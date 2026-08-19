@@ -25,6 +25,7 @@ const Body = z.object({
 export const PATCH = guard(async (req: Request) => {
   const me = await requireUser();
   const parsed = Body.safeParse(await req.json().catch(() => null));
+  console.log("Parsed data from api/location", parsed);
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
 
   const updated = await db
