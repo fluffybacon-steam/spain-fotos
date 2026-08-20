@@ -23,8 +23,11 @@ export default function UploadPage() {
         <p className="eyebrow mb-1 flash-text">READ ME</p>
         <ul className="flex flex-col gap-2.5 text-sm text-haze">
           <li>
-            <strong className="text-foam">Bad new iPhone users</strong>. Ideally, this web app will tag the locations of your photos automagically using the metadata.
-            But because Apple is a snob about privacy they strips that shit from any website that asks for photo shares.
+            <strong className="text-foam">Bad news iPhone users</strong>. Ideally, this web app would tag the locations of your photos automagically using the metadata.
+            But because Apple is a snob about privacy, they strips that shit from any website that asks for photo shares.
+          </li>
+          <li>
+            You can test your images metadata <Link className="underline text-foam" href='/debug'>here</Link> before uploading
           </li>
           <li>
             In the likely event your photos are not auto-pinned, you can do so manually on the map page for precision pinning.

@@ -533,6 +533,7 @@ body {
     background 120ms ease;
   .memory{
     z-index: -1;
+    width:100%;
     position: absolute;
     bottom: 0px;
     left: 50%;
@@ -541,11 +542,15 @@ body {
     transition: translate 520ms ease, clip-path 520ms ease;
   }
 }
+.reaction.active {
+  margin-bottom:20px;
+}
 .reaction.active .memory{
   translate: -50% 2em;
   clip-path: xywh(0px 0em 100% 100%);
 }
 .reaction:hover {
+  margin-top:2px;
   transform: translateY(-2px);
   border-color: var(--color-haze);
 }

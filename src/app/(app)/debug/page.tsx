@@ -167,15 +167,13 @@ export default function DebugPage() {
     <main className="mx-auto min-h-dvh w-full max-w-2xl px-4 py-6">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <p className="eyebrow">Nothing is uploaded from this page</p>
           <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Metadata check</h1>
         </div>
         <Link href="/" className="btn btn-quiet btn-sm">Map</Link>
       </div>
 
       <p className="mb-5 text-sm text-haze">
-        Pick the same photo through both buttons. On Android they often open different
-        pickers, and the two frequently disagree about whether location survives.
+        Test your photo's metadata. Nothing is uploaded here, just for tests.
       </p>
 
       <section
@@ -202,10 +200,7 @@ export default function DebugPage() {
         </dl>
 
         <p className="mt-2 text-sm text-haze">
-          Grant this, then re-pick the same photo through button 1 and compare the two
-          reports. Android redacts GPS in the photo picker based on a permission the
-          browser holds, not one the page holds, so expect no change — the readout below
-          records which reports were taken before and after so the result is unambiguous.
+          Grant this to see if it makes Apple chill.
         </p>
       </section>
 

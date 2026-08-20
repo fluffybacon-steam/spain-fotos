@@ -231,14 +231,14 @@ export default function BrowsePage() {
       </div>
 
       {/* Who took it. Horizontally scrollable so it survives a big group. */}
-      <div className="scroll-slim -mx-1 mb-4 flex gap-1.5 px-1 pb-1 overflow-visible">
+      <div className="scroll-slim -mx-1 mb-4 flex gap-1.5 px-1 pb-1 overflow-x-scroll overflow-y-visible">
         <button
           type="button"
           className={who === null && photos.length > 0 ? "reaction active shrink-0" : "reaction shrink-0"}
           data-mine={who === null}
           onClick={() => setWho(null)}
         >
-          <span>Everyone</span>
+          <span>Todo</span>
           <span>{photos.length}</span>
           <span className="memory">{totalMemory}</span>
         </button>
