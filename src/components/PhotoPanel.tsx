@@ -51,10 +51,11 @@ export default function PhotoPanel({
         </button>
       </header>
 
-      <div className="scroll-slim grid grid-cols-3 gap-1 overflow-y-auto p-1 sm:grid-cols-3">
+      <div className="scroll-slim grid grid-cols-3 gap-1 overflow-y-scroll p-1 sm:grid-cols-3" style={{ gridAutoRows: "minmax(100px, 250px)" }}>
         {photos.map((photo, i) => (
           <button
             key={photo.id}
+            style={{ width: "100%", height: "100%" }}
             type="button"
             onClick={() => onSelect(i)}
             className="group relative aspect-square overflow-hidden rounded-[2px] bg-hull-hi"

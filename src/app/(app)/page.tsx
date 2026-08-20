@@ -22,7 +22,10 @@ export default function MapPage() {
   const [panel, setPanel] = useState<{ ids: string[]; title?: string } | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
-  const [pinFor, setPinFor] = useState<string[] | null>(null);
+  // `mode` only affects wording and where Cancel returns to: "place" came from
+  // the unplaced list and should fall back to it, "move" came from the viewer
+  // and has no list to go back to.
+  const [pinFor, setPinFor] = useState<{ ids: string[]; mode: "place" | "move" } | null>(null);
   const [naming, setNaming] = useState<{ lat: number; lng: number; ids: string[] } | null>(null);
   const [placeName, setPlaceName] = useState("");
 
@@ -90,14 +93,26 @@ export default function MapPage() {
         body: JSON.stringify({ ids, lat, lng }),
       });
 
-      if (!res.ok) {
-        setPhotos((prev) => prev.map((p) => before.find((b) => b.id === p.id) ?? p));
-        return;
+      // The route answers 200 with the ids it actually wrote — the permission
+      // rule skips rows rather than failing the request, so a photo someone else
+      // already placed comes back missing from `updated`. Trusting the status
+      // alone would leave that photo showing a pin the server never stored.
+      let updated: string[] = [];
+      if (res.ok) {
+        const body = (await res.json().catch(() => null)) as { updated?: string[] } | null;
+        updated = body?.updated ?? [];
       }
+      const wrote = new Set(updated);
+
+      if (wrote.size !== ids.length) {
+        const restore = new Map(before.filter((p) => !wrote.has(p.id)).map((p) => [p.id, p]));
+        setPhotos((prev) => prev.map((p) => restore.get(p.id) ?? p));
+      }
+      if (!wrote.size) return;
 
       // Offer to name a spot only where there isn't one already nearby.
       if (!nearestNamed({ lat, lng }, allNames)) {
-        setNaming({ lat, lng, ids });
+        setNaming({ lat, lng, ids: updated });
         setPlaceName("");
       }
     },
@@ -126,9 +141,9 @@ export default function MapPage() {
         onCenterChange={(lat, lng) => setCentre({ lat, lng })}
         pickMode={Boolean(pinFor)}
         onPick={(lat, lng) => {
-          const ids = pinFor;
+          const task = pinFor;
           setPinFor(null);
-          if (ids) void applyLocation(ids, lat, lng);
+          if (task) void applyLocation(task.ids, lat, lng);
         }}
       />
 
@@ -170,7 +185,7 @@ export default function MapPage() {
           namedPlaces={allNames}
           onApply={applyLocation}
           onDropPin={(ids) => {
-            setPinFor(ids);
+            setPinFor({ ids, mode: "place" });
             setPicking(false);
           }}
           onClose={() => setPicking(false)}
@@ -195,6 +210,13 @@ export default function MapPage() {
           meId={meId ?? undefined}
           onDeleted={removePhoto}
           namedPlaces={allNames}
+          onRepin={(id) => {
+            // Clear both overlays: the viewer and the panel sit on top of the
+            // map, and the next thing this user has to do is tap the map.
+            setLightboxIndex(null);
+            setPanel(null);
+            setPinFor({ ids: [id], mode: "move" });
+          }}
           onClose={() => {
             setLightboxIndex(null);
             if (panelPhotos.length === 1) setPanel(null);
@@ -205,14 +227,19 @@ export default function MapPage() {
       {pinFor && (
         <div className="glass absolute inset-x-2 bottom-2 z-40 flex items-center gap-3 rounded-[4px] px-3 py-2.5">
           <p className="flex-1 text-sm">
-            Tap the map to place {pinFor.length} {pinFor.length === 1 ? "foto" : "fotos"}
+            {pinFor.mode === "move"
+              ? "Tap the map to move this foto"
+              : `Tap the map to place ${pinFor.ids.length} ${pinFor.ids.length === 1 ? "foto" : "fotos"}`}
           </p>
           <button
             type="button"
             className="btn btn-quiet btn-sm"
             onClick={() => {
+              const mode = pinFor.mode;
               setPinFor(null);
-              setPicking(true);
+              // Reopening the unplaced list is only right for a first placement;
+              // a move started from the viewer has nothing to go back to.
+              if (mode === "place") setPicking(true);
             }}
           >
             Cancel

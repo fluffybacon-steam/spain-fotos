@@ -19,6 +19,12 @@ type Props = {
   /** Signed-in user id, so the owner sees a delete control. */
   meId?: string;
   onDeleted?: (photoId: string) => void;
+  /**
+   * Hand this photo back to the map so its owner can drop the pin again.
+   * Optional: views without a map behind them (Browse) leave it off and the
+   * control doesn't render.
+   */
+  onRepin?: (photoId: string) => void;
   /** Whether the photo on screen is in the caller's download selection. */
   selected?: boolean;
   /** Omit to hide the selection control entirely. */
@@ -34,6 +40,7 @@ export default function Lightbox({
   namedPlaces = [],
   meId,
   onDeleted,
+  onRepin,
   selected = false,
   onToggleSelect,
 }: Props) {
@@ -106,10 +113,16 @@ export default function Lightbox({
   if (!photo) return null;
 
   const taken = photo.takenAt ? new Date(photo.takenAt) : null;
-  const place =
-    photo.lat !== null && photo.lng !== null
-      ? nearestNamed({ lat: photo.lat, lng: photo.lng }, namedPlaces)
-      : null;
+  const mine = Boolean(meId && photo.ownerId === meId);
+  const placed = photo.lat !== null && photo.lng !== null;
+  const place = placed
+    ? nearestNamed({ lat: photo.lat!, lng: photo.lng! }, namedPlaces)
+    : null;
+
+  // Matches the server rule in /api/photos/location: an owner may move their own
+  // photo wherever it currently sits, including a coordinate the camera recorded
+  // — a bad GPS fix is exactly the thing worth correcting.
+  const canRepin = Boolean(onRepin) && mine && placed;
 
   return (
     <div className="lightbox-backdrop" role="dialog" aria-modal="true" aria-label="Photo viewer">
@@ -169,7 +182,33 @@ export default function Lightbox({
           </svg>
         </button>
 
-        {meId && photo.ownerId === meId && (
+        {canRepin && (
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => onRepin?.(photo.id)}
+            aria-label="Move this photo's pin on the map"
+            title="Move pin"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M8 13.6s3.9-3.75 3.9-6.4a3.9 3.9 0 1 0-7.8 0c0 2.65 3.9 6.4 3.9 6.4Z"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+              <circle cx="8" cy="7.1" r="1.45" stroke="currentColor" strokeWidth="1.3" />
+              <path
+                d="M2.4 3.1h2.2M3.5 2v2.2"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        )}
+
+        {mine && (
           <button
             type="button"
             className="icon-btn"
@@ -335,11 +374,25 @@ export default function Lightbox({
                         minute: "2-digit",
                       })
                     : "Date unknown"}
-                  {photo.lat !== null && photo.lng !== null && (
+                  {placed && (
                     <>
                       {"  ·  "}
-                      {place ? place.name : `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}`}
+                      {place ? place.name : `${photo.lat!.toFixed(5)}, ${photo.lng!.toFixed(5)}`}
                       {photo.locationSource === "manual" && " (placed by hand)"}
+                    </>
+                  )}
+                  {/* Second way in, next to the coordinate people are actually
+                      reading when they notice it's wrong. */}
+                  {canRepin && (
+                    <>
+                      {"  ·  "}
+                      <button
+                        type="button"
+                        className="underline underline-offset-2 hover:text-foam"
+                        onClick={() => onRepin?.(photo.id)}
+                      >
+                        Move
+                      </button>
                     </>
                   )}
                 </p>
