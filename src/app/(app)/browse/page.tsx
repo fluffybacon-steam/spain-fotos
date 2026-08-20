@@ -11,10 +11,14 @@ import type { NamedPlace } from "@/lib/places";
 import { formatDuration } from "@/lib/client/video";
 import type { PersonDTO, PhotoDTO } from "@/types";
 
+const KB = 1024;
+const MB = KB * 1024;
+const GB = MB * 1024;
+
 function formatBytes(bytes: number) {
-  return bytes > 1024 * 1024
-    ? `${Math.round(bytes / (1024 * 1024))} MB`
-    : `${Math.round(bytes / 1024)} KB`;
+  if (bytes >= GB) return `${(bytes / GB).toFixed(1)} GB`;
+  if (bytes >= MB) return `${Math.round(bytes / MB)} MB`;
+  return `${Math.round(bytes / KB)} KB`;
 }
 
 /**
