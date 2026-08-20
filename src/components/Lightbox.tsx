@@ -19,6 +19,10 @@ type Props = {
   /** Signed-in user id, so the owner sees a delete control. */
   meId?: string;
   onDeleted?: (photoId: string) => void;
+  /** Whether the photo on screen is in the caller's download selection. */
+  selected?: boolean;
+  /** Omit to hide the selection control entirely. */
+  onToggleSelect?: (photoId: string) => void;
 };
 
 export default function Lightbox({
@@ -30,6 +34,8 @@ export default function Lightbox({
   namedPlaces = [],
   meId,
   onDeleted,
+  selected = false,
+  onToggleSelect,
 }: Props) {
   const photo = photos[index];
   const touchStart = useRef<{ x: number; y: number } | null>(null);
@@ -48,6 +54,12 @@ export default function Lightbox({
     [index, photos.length, onIndexChange],
   );
 
+  const photoId = photo?.id;
+
+  const toggleSelect = useCallback(() => {
+    if (photoId) onToggleSelect?.(photoId);
+  }, [photoId, onToggleSelect]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       // Arrow keys and Escape belong to whatever field has focus.
@@ -59,6 +71,7 @@ export default function Lightbox({
       else if (e.key === "ArrowRight") go(1);
       else if (e.key === "ArrowLeft") go(-1);
       else if (e.key === "i") setShowMeta((v) => !v);
+      else if (e.key === "s") toggleSelect();
     }
     window.addEventListener("keydown", onKey);
     // Stop the page behind from scrolling while the lightbox owns the screen.
@@ -68,7 +81,7 @@ export default function Lightbox({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [go, onClose]);
+  }, [go, onClose, toggleSelect]);
 
   // Warm the neighbours so arrowing through feels instant.
   useEffect(() => {
@@ -113,6 +126,34 @@ export default function Lightbox({
             {index + 1} / {photos.length}
           </p>
         </div>
+
+        {onToggleSelect && (
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={toggleSelect}
+            aria-label={selected ? "Remove from selection" : "Add to selection"}
+            aria-pressed={selected}
+            style={
+              selected
+                ? { background: "var(--color-foam)", color: "var(--color-deep)" }
+                : undefined
+            }
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.4" />
+              {selected && (
+                <path
+                  d="M5.2 8.2l2 2 3.6-4"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+            </svg>
+          </button>
+        )}
 
         <button
           type="button"

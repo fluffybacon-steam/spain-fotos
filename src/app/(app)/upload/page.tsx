@@ -23,17 +23,20 @@ export default function UploadPage() {
         <p className="eyebrow mb-1 flash-text">READ ME</p>
         <ul className="flex flex-col gap-2.5 text-sm text-haze">
           <li>
-            Upload photos will be converted & compressed slightly (94% quality) to save space on storage. You shouldn't even notice. That said, I do have not infinite storage so
-            <strong className="text-foam"> please don't go crazy with the videos.</strong> You can see how much space you've used on the 
-            <Link href="/browse">gallery page</Link>. So long as everyone stays under 10 GB we should be good.
-          </li>
-          <li>
-            Ideally, this web app will tag the locations of your photos automagically using the metadata.
-            This likely <em>won't</em> happen because Apple is a snob about private data they can't sell and strips that shit from any share action.
+            <strong className="text-foam">Bad new iPhone users</strong>. Ideally, this web app will tag the locations of your photos automagically using the metadata.
+            But because Apple is a snob about privacy they strips that shit from any website that asks for photo shares.
           </li>
           <li>
             In the likely event your photos are not auto-pinned, you can do so manually on the map page for precision pinning.
             <strong className="text-foam"> Or chose from my pre-selected locations that will show up under the uploads to make it easy.</strong> Or you don't have to pin them at all. its your life.
+          </li>
+          <li>
+            <strong className="text-foam">One way to circumvent iOS privacy setting is to upload your photos from a desktop/laptop.</strong> This would involve going into Google Photos or iCloud Photos, download your trips photo to the computer and then upload to the website. Completely circumventing the iPhone's privacy os bullshit.
+          </li>
+          <li>
+            Upload photos will be converted & compressed slightly (94% quality) to save space on storage. You shouldn't even notice. That said, I do have not infinite storage so
+            <strong className="text-foam"> please don't go crazy with the videos.</strong> You can see how much space you've used on the 
+            <Link href="/browse">gallery page</Link>. So long as everyone stays under 10 GB we should be good.
           </li>
           <li>
             Feedback, bugs and any suggestions you have are welcome. @ me. If this sucks, feel free to make a dropbox or something. It will only hurt my feelings a little bit
