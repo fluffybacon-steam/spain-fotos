@@ -60,6 +60,7 @@ export default function BrowsePage() {
           })
         : "Date unknown";
       const list = map.get(key);
+      console.log("photo id", p.id);
       if(p.id !== "JO_rqo26TdIVqW6R"){
         list ? list.push(p) : map.set(key, [p]);
       }
@@ -80,12 +81,15 @@ export default function BrowsePage() {
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-5xl px-3 py-5">
-      <div className="mb-4 flex items-start justify-between gap-4 px-1">
-        <div>
+      <div className="mb-4 flex items-start justify-end gap-4 px-1">
+        <div style={{ marginRight: "auto" }}>
           <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Gallery</h1>
         </div>
         <Link href="/" className="btn btn-quiet btn-sm">
           Map
+        </Link>
+        <Link href="/upload" className="btn btn-primary btn-sm">
+          Add fotos
         </Link>
       </div>
 

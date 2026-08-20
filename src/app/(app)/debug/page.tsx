@@ -95,11 +95,11 @@ export default function DebugPage() {
         ref={pickerRef}
         type="file"
         multiple
-        accept="image/*,.heic,.heif"
+        accept="file"
         className="sr-only"
         onChange={(e) => {
           // Snapshot before clearing the input — the FileList is live.
-          void inspect(Array.from(e.target.files ?? []), "photo picker");
+          void inspect(Array.from(e.target.files ?? []), "g picker");
           e.target.value = "";
         }}
       />

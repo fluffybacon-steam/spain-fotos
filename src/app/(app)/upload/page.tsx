@@ -5,12 +5,15 @@ import Uploader from "@/components/Uploader";
 export default function UploadPage() {
   return (
     <main className="mx-auto min-h-dvh w-full max-w-2xl px-4 py-6">
-      <div className="mb-7 flex items-start justify-between gap-4">
-        <div>
+      <div className="mb-7 flex items-start justify-end gap-4">
+        <div style={{marginRight: "auto"}}>
           <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Upload</h1>
         </div>
         <Link href="/" className="btn btn-quiet btn-sm">
           Map
+        </Link>
+        <Link href="/browse" className="btn btn-quiet btn-sm sm:hidden">
+          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M360-400h400L622-580l-92 120-62-80-108 140Zm-40 160q-33 0-56.5-23.5T240-320v-480q0-33 23.5-56.5T320-880h480q33 0 56.5 23.5T880-800v480q0 33-23.5 56.5T800-240H320Zm0-80h480v-480H320v480ZM160-80q-33 0-56.5-23.5T80-160v-560h80v560h560v80H160Zm160-720v480-480Z"/></svg>
         </Link>
       </div>
 
