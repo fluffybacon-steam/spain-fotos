@@ -52,6 +52,10 @@ export default function Lightbox({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [commentCount, setCommentCount] = useState<number | null>(null);
+  const [editingTime, setEditingTime] = useState(false);
+  const [timeDraft, setTimeDraft] = useState("");
+  const [savingTime, setSavingTime] = useState(false);
+  const [timeError, setTimeError] = useState<string | null>(null);
 
   const go = useCallback(
     (delta: number) => {
@@ -108,6 +112,10 @@ export default function Lightbox({
     setCommentCount(null);
     setPlaybackFailed(false);
     setConfirmDelete(false);
+    // An open editor must not carry a half-typed date onto the next photo.
+    setEditingTime(false);
+    setSavingTime(false);
+    setTimeError(null);
   }, [photo?.id]);
 
   if (!photo) return null;
@@ -119,10 +127,57 @@ export default function Lightbox({
     ? nearestNamed({ lat: photo.lat!, lng: photo.lng! }, namedPlaces)
     : null;
 
-  // Matches the server rule in /api/photos/location: an owner may move their own
-  // photo wherever it currently sits, including a coordinate the camera recorded
-  // — a bad GPS fix is exactly the thing worth correcting.
-  const canRepin = Boolean(onRepin) && mine && placed;
+  // Matches the server rule in /api/photos/location: the pin belongs to the
+  // trip, not to the uploader, so anyone may correct one — placed or not, theirs
+  // or not. Gated only on the caller wiring up a map to drop it on, which Browse
+  // doesn't.
+  const canRepin = Boolean(onRepin);
+
+  /**
+   * Writes a corrected capture time. Open to everyone for the same reason the
+   * pin is: a clock left on the wrong timezone, or a forwarded photo stamped
+   * with the moment it was received, is usually spotted by someone other than
+   * the person who uploaded it.
+   */
+  async function saveTime() {
+    if (savingTime) return;
+    const ms = Date.parse(timeDraft);
+    if (Number.isNaN(ms)) {
+      setTimeError("That isn't a date this app can read");
+      return;
+    }
+
+    setSavingTime(true);
+    setTimeError(null);
+    const iso = new Date(ms).toISOString();
+
+    try {
+      const res = await fetch(`/api/photos/${photo.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ takenAt: iso }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `Couldn't save that time (${res.status})`);
+      }
+      // Only after the server has taken it. The gallery groups by date, so an
+      // optimistic update here would visibly re-file the photo under a heading
+      // it might have to leave again.
+      onPhotoChange({ ...photo, takenAt: iso });
+      setEditingTime(false);
+    } catch (err) {
+      setTimeError(err instanceof Error ? err.message : "Couldn't save that time");
+    } finally {
+      setSavingTime(false);
+    }
+  }
+
+  function startEditingTime() {
+    setTimeDraft(toDateTimeLocal(photo.takenAt));
+    setTimeError(null);
+    setEditingTime(true);
+  }
 
   return (
     <div className="lightbox-backdrop" role="dialog" aria-modal="true" aria-label="Photo viewer">
@@ -187,8 +242,8 @@ export default function Lightbox({
             type="button"
             className="icon-btn"
             onClick={() => onRepin?.(photo.id)}
-            aria-label="Move this photo's pin on the map"
-            title="Move pin"
+            aria-label={placed ? "Move this photo's pin on the map" : "Place this photo on the map"}
+            title={placed ? "Move pin" : "Place on map"}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path
@@ -364,38 +419,90 @@ export default function Lightbox({
               <Avatar url={photo.ownerAvatarUrl} name={photo.ownerName} size={32} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{photo.ownerName}</p>
-                <p className="coord truncate">
-                  {taken
-                    ? taken.toLocaleString(undefined, {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "Date unknown"}
-                  {placed && (
-                    <>
-                      {"  ·  "}
-                      {place ? place.name : `${photo.lat!.toFixed(5)}, ${photo.lng!.toFixed(5)}`}
-                      {photo.locationSource === "manual" && " (placed by hand)"}
-                    </>
-                  )}
-                  {/* Second way in, next to the coordinate people are actually
-                      reading when they notice it's wrong. */}
-                  {canRepin && (
-                    <>
-                      {"  ·  "}
-                      <button
-                        type="button"
-                        className="underline underline-offset-2 hover:text-foam"
-                        onClick={() => onRepin?.(photo.id)}
-                      >
-                        Move
-                      </button>
-                    </>
-                  )}
-                </p>
+
+                {editingTime ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <input
+                      className="field"
+                      type="datetime-local"
+                      value={timeDraft}
+                      autoFocus
+                      disabled={savingTime}
+                      style={{ width: "auto", flex: "1 1 12rem" }}
+                      onChange={(e) => setTimeDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        // The viewer listens for arrows and Escape globally.
+                        e.stopPropagation();
+                        if (e.key === "Enter") void saveTime();
+                        if (e.key === "Escape") setEditingTime(false);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={savingTime}
+                      onClick={() => void saveTime()}
+                    >
+                      {savingTime ? "Saving…" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-sm"
+                      disabled={savingTime}
+                      onClick={() => setEditingTime(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <p className="coord truncate">
+                    {/* The date is the control. People notice a wrong timestamp
+                        while reading it, so that's where the way to fix it goes. */}
+                    <button
+                      type="button"
+                      className="underline underline-offset-2 hover:text-foam"
+                      onClick={startEditingTime}
+                      title="Correct the date and time"
+                    >
+                      {taken
+                        ? taken.toLocaleString(undefined, {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "Date unknown"}
+                    </button>
+                    {placed && (
+                      <>
+                        {"  ·  "}
+                        {place ? place.name : `${photo.lat!.toFixed(5)}, ${photo.lng!.toFixed(5)}`}
+                        {photo.locationSource === "manual" && " (placed by hand)"}
+                      </>
+                    )}
+                    {/* Second way in, next to the coordinate people are actually
+                        reading when they notice it's wrong. */}
+                    {canRepin && (
+                      <>
+                        {"  ·  "}
+                        <button
+                          type="button"
+                          className="underline underline-offset-2 hover:text-foam"
+                          onClick={() => onRepin?.(photo.id)}
+                        >
+                          {placed ? "Move" : "Place"}
+                        </button>
+                      </>
+                    )}
+                  </p>
+                )}
+
+                {timeError && (
+                  <p className="mt-1 text-xs text-coral" role="alert">
+                    {timeError}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -439,4 +546,18 @@ export default function Lightbox({
       )}
     </div>
   );
+}
+/**
+ * ISO string to the value an `<input type="datetime-local">` wants:
+ * `YYYY-MM-DDTHH:mm`, in the viewer's own timezone and with no offset suffix.
+ *
+ * Built by hand rather than by slicing `toISOString()`, which is UTC — slicing
+ * it shows a photo taken at 21:00 in Mallorca as 19:00, and saving would then
+ * silently shift it by the offset every time anyone opened the editor.
+ */
+function toDateTimeLocal(iso: string | null): string {
+  const d = iso ? new Date(iso) : new Date();
+  if (Number.isNaN(d.getTime())) return toDateTimeLocal(null);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
