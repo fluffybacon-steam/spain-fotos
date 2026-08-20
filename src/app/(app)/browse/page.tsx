@@ -9,7 +9,6 @@ import { PRESET_PLACES } from "@/lib/preset-places";
 import type { NamedPlace } from "@/lib/places";
 import { formatDuration } from "@/lib/client/video";
 import type { PersonDTO, PhotoDTO } from "@/types";
-import { set } from "zod";
 
 export default function BrowsePage() {
   const [photos, setPhotos] = useState<PhotoDTO[]>([]);
@@ -19,7 +18,6 @@ export default function BrowsePage() {
   const [loading, setLoading] = useState(true);
   const [who, setWho] = useState<string | null>(null); // null = everyone
   const [index, setIndex] = useState<number | null>(null);
-  const [totalMemory, setMemory] = useState<number | null>(0);
 
   useEffect(() => {
     (async () => {
@@ -44,14 +42,23 @@ export default function BrowsePage() {
     [photos, who],
   );
 
+  const totalMemory = useMemo(() => {
+    const bytes = shown.reduce((acc, p) => acc + (p.originalBytes || 0), 0);
+    if (bytes > 1024 * 1024) {
+      return Math.round(bytes / (1024 * 1024)) + " MB";
+    }
+    return Math.round(bytes / 1024) + " KB";
+  }, [shown]);
+
   const allNames = useMemo(() => [...PRESET_PLACES, ...namedPlaces], [namedPlaces]);
 
   // Photos arrive newest-first; group them under a date heading so scrolling a
   // long trip stays legible rather than becoming an undifferentiated wall.
   const groups = useMemo(() => {
-    let group_memory = 0;
     const map = new Map<string, PhotoDTO[]>();
     for (const p of shown) {
+      if (p.id === "JO_rqo26TdIVqW6R") continue;
+
       const key = p.takenAt
         ? new Date(p.takenAt).toLocaleDateString(undefined, {
             weekday: "short",
@@ -60,13 +67,8 @@ export default function BrowsePage() {
           })
         : "Date unknown";
       const list = map.get(key);
-      console.log("photo id", p.id);
-      if(p.id !== "JO_rqo26TdIVqW6R"){
-        list ? list.push(p) : map.set(key, [p]);
-      }
-      group_memory += p.originalBytes;
+      list ? list.push(p) : map.set(key, [p]);
     }
-    setMemory(() => group_memory > 1024 * 1024 ? Math.round(group_memory / (1024 * 1024)) + " MB" : Math.round(group_memory / 1024) + " KB");
     return [...map.entries()];
   }, [shown]);
 
@@ -103,7 +105,7 @@ export default function BrowsePage() {
         >
           <span>Everyone</span>
           <span>{photos.length}</span>
-          <span className="memory" >{totalMemory}</span>
+          <span className="memory">{totalMemory}</span>
         </button>
         {people
           .filter((p) => p.photoCount > 0)
@@ -118,7 +120,6 @@ export default function BrowsePage() {
               <Avatar url={person.avatarUrl} name={person.name} size={18} count={person.photoCount}/>
               <span className="max-w-28 truncate">{person.name}</span>
               <span>{person.photoCount}</span>
-              <span className="memory">{totalMemory}</span>
             </button>
           ))}
       </div>
