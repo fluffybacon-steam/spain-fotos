@@ -213,12 +213,12 @@ export default function BrowsePage() {
           {photos.length > 0 && (
           <button
             type="button"
-            style={{ '--color-shoal': 'floralwhite' }}
+            style={{ background: 'floralwhite' }}
             className={selectMode ? "btn btn-primary btn-sm" : "btn btn-primary btn-sm"}
             aria-pressed={selectMode}
             onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
           >
-            {selectMode ? "Download!" : "Bulk Select"}
+            {selectMode ? "Cancel Select" : "Bulk Select"}
           </button>
         )}
         </div>
