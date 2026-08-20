@@ -325,6 +325,7 @@ export default function Lightbox({
             </div>
           ) : (
             <video
+              style={{ position: "absolute" }}
               key={photo.id}
               src={photo.originalUrl}
               poster={photo.displayUrl}
