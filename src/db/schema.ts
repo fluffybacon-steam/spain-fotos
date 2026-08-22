@@ -109,6 +109,34 @@ export const comments = pgTable(
   (t) => [index("comments_photo_idx").on(t.photoId, t.createdAt)],
 );
 
+/**
+ * One person's private shortlist. Deliberately not a reaction: reactions are a
+ * conversation — everyone sees the tally and who left what — whereas a favorite
+ * is a bookmark. Nothing about this table is ever exposed to anyone but the
+ * user who wrote the row, which is what lets people star freely (including
+ * their own photos, and including the unflattering one they want to find again
+ * to delete) without it reading as a public verdict.
+ */
+export const favorites = pgTable(
+  "favorites",
+  {
+    photoId: text("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Starring twice is the same as starring once, so the pair is the key.
+  (t) => [
+    primaryKey({ columns: [t.photoId, t.userId] }),
+    // Every read is "my favorites" — the primary key leads with photo_id and
+    // can't serve that.
+    index("favorites_user_idx").on(t.userId, t.createdAt),
+  ],
+);
+
 export const REACTION_KINDS = ["heart", "up", "meh", "down", "poo"] as const;
 export type ReactionKind = (typeof REACTION_KINDS)[number];
 

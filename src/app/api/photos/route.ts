@@ -2,7 +2,16 @@
 import { NextResponse } from "next/server";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, photos, users, reactions, comments, REACTION_KINDS, type ReactionKind } from "@/db";
+import {
+  db,
+  photos,
+  users,
+  reactions,
+  comments,
+  favorites,
+  REACTION_KINDS,
+  type ReactionKind,
+} from "@/db";
 import { requireUser, guard } from "@/lib/session";
 import type { PhotoDTO } from "@/types";
 
@@ -39,6 +48,18 @@ export const GET = guard(async () => {
     : [];
   const commentCounts = new Map(commentRows.map((r) => [r.photoId, r.n]));
 
+  // Scoped to the caller, not to `ids`: favorites are private, so nobody else's
+  // rows are ever loaded, and one person's shortlist is small enough that
+  // fetching it whole is cheaper than sending a list of photo ids back.
+  const myFavorites = new Set(
+    (
+      await db
+        .select({ photoId: favorites.photoId })
+        .from(favorites)
+        .where(eq(favorites.userId, me.uid))
+    ).map((r) => r.photoId),
+  );
+
   const tallies = new Map<string, Record<ReactionKind, number>>();
   const mine = new Map<string, ReactionKind>();
   for (const r of allReactions) {
@@ -71,6 +92,7 @@ export const GET = guard(async () => {
     originalName: p.originalName,
     originalBytes: p.originalBytes,
     commentCount: commentCounts.get(p.id) ?? 0,
+    isFavorite: myFavorites.has(p.id),
     reactions: tallies.get(p.id) ?? emptyTally(),
     myReaction: mine.get(p.id) ?? null,
   }));

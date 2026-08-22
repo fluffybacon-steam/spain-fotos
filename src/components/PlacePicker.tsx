@@ -1,25 +1,17 @@
 "use client";
 // src/components/PlacePicker.tsx
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { PhotoDTO } from "@/types";
-import {
-  clusterPhotos,
-  nameClusters,
-  suggestByTime,
-  formatGap,
-  distanceMeters,
-  isLocated,
-  type DerivedPlace,
-  type NamedPlace,
-} from "@/lib/places";
-import { PRESET_PLACES } from "@/lib/preset-places";
+import DestinationList from "./DestinationList";
+import type { NamedPlace } from "@/lib/places";
 
 type Props = {
   unplaced: PhotoDTO[];
   located: PhotoDTO[];
   namedPlaces: NamedPlace[];
-  onApply: (ids: string[], lat: number, lng: number) => Promise<void>;
+  /** Resolves when the write has settled; the result is the caller's business. */
+  onApply: (ids: string[], lat: number, lng: number) => Promise<unknown>;
   onDropPin: (ids: string[]) => void;
   onClose: () => void;
 };
@@ -35,29 +27,7 @@ export default function PlacePicker({
   const [selected, setSelected] = useState<Set<string>>(() => new Set(unplaced.slice(0, 1).map((p) => p.id)));
   const [busy, setBusy] = useState(false);
 
-  const spots = useMemo<DerivedPlace[]>(
-    () => nameClusters(clusterPhotos(located), namedPlaces),
-    [located, namedPlaces],
-  );
-
   const selectedPhotos = unplaced.filter((p) => selected.has(p.id));
-
-  // Only offer presets that aren't already represented by a real cluster —
-  // otherwise "Sóller" appears twice, once with photos and once without.
-  const presets = useMemo(
-    () => PRESET_PLACES.filter((preset) => !spots.some((s) => distanceMeters(s, preset) <= (preset.radiusMeters ?? 250))),
-    [spots],
-  );
-
-  // Only offer a time-based guess when exactly one photo is selected — the
-  // suggestion is per-photo and averaging it across a selection would be a lie.
-  const suggestion = useMemo(() => {
-    if (selectedPhotos.length !== 1) return null;
-    const hit = suggestByTime(selectedPhotos[0], located);
-    if (!hit) return null;
-    const spot = spots.find((s) => distanceMeters(s, hit.place) <= 200) ?? null;
-    return { ...hit, spot };
-  }, [selectedPhotos, located, spots]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -136,90 +106,14 @@ export default function PlacePicker({
           </div>
         </div>
 
-        {/* Time-based guess ---------------------------------------------- */}
-        {suggestion && (
-          <div className="border-b border-hairline p-3">
-            <p className="eyebrow mb-2">Best guess</p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => apply(suggestion.place.lat, suggestion.place.lng)}
-              className="flex w-full items-center gap-3 rounded-[3px] border border-shoal/50 bg-shoal/10 p-2 text-left transition-colors hover:bg-shoal/20"
-            >
-              <img
-                src={suggestion.neighbour.thumbUrl}
-                alt=""
-                className="h-12 w-12 shrink-0 rounded-[2px] object-cover"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">
-                  {suggestion.spot?.name ??
-                    `${suggestion.place.lat.toFixed(4)}, ${suggestion.place.lng.toFixed(4)}`}
-                </p>
-                <p className="coord truncate">
-                  Taken {formatGap(suggestion.minutesApart)} from {suggestion.neighbour.ownerName}
-                  &apos;s photo here
-                </p>
-              </div>
-            </button>
-          </div>
-        )}
-
-        {/* Spots already on the map -------------------------------------- */}
-        <div className="p-3">
-          <p className="eyebrow mb-2">
-            {spots.length ? "Spots from the trip" : "No placed photos yet"}
-          </p>
-
-          <ul className="flex flex-col gap-1">
-            {spots.map((spot) => (
-              <li key={spot.key}>
-                <button
-                  type="button"
-                  disabled={busy || !selected.size}
-                  onClick={() => apply(spot.lat, spot.lng)}
-                  className="flex w-full items-center gap-3 rounded-[3px] border border-hairline bg-hull p-2 text-left transition-colors hover:border-shoal disabled:opacity-40"
-                >
-                  <img src={spot.thumbUrl} alt="" className="h-11 w-11 shrink-0 rounded-[2px] object-cover" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">
-                      {spot.name ?? `${spot.lat.toFixed(4)}, ${spot.lng.toFixed(4)}`}
-                    </p>
-                    <p className="coord">
-                      {spot.count} {spot.count === 1 ? "photo" : "photos"}
-                      {spot.earliest &&
-                        ` · ${new Date(spot.earliest).toLocaleDateString(undefined, {
-                          day: "numeric",
-                          month: "short",
-                        })}`}
-                    </p>
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Trip destinations ------------------------------------------- */}
-        {presets.length > 0 && (
-          <div className="border-t border-hairline p-3">
-            <p className="eyebrow mb-2">Trip destinations</p>
-            <div className="flex flex-wrap gap-1.5">
-              {presets.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  disabled={busy || !selected.size}
-                  onClick={() => apply(preset.lat, preset.lng)}
-                  className="reaction disabled:opacity-40"
-                >
-                  <span className="glyph">📍</span>
-                  <span>{preset.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Where it goes ------------------------------------------------ */}
+        <DestinationList
+          targets={selectedPhotos}
+          located={located}
+          namedPlaces={namedPlaces}
+          disabled={busy || !selected.size}
+          onPick={(lat, lng) => void apply(lat, lng)}
+        />
       </div>
 
       <footer className="border-t border-hairline p-3">

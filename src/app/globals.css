@@ -190,6 +190,36 @@ body {
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.6);
 }
 
+/* ── Merge mode ───────────────────────────────────────────────────────────
+   While pins are being consolidated a tap selects rather than opens, so they
+   have to stop looking like doors. Unselected markers recede, selected ones
+   take the same shoal ring that hover already uses for "this is the one you're
+   pointing at" — held rather than momentary. */
+.pin[data-merge="true"],
+.cluster[data-merge="true"] {
+  cursor: copy;
+}
+.pin[data-merge="true"][data-selected="false"],
+.cluster[data-merge="true"][data-selected="false"] {
+  opacity: 0.5;
+  filter: saturate(0.6);
+}
+.pin[data-selected="true"] {
+  transform: rotate(0deg) scale(1.12);
+  box-shadow:
+    0 6px 18px rgb(0 0 0 / 0.6),
+    0 0 0 2.5px var(--color-shoal);
+  z-index: 6;
+}
+.cluster[data-selected="true"] {
+  transform: scale(1.08);
+}
+.cluster[data-selected="true"] .cluster-sheet {
+  box-shadow:
+    0 2px 8px rgb(0 0 0 / 0.55),
+    0 0 0 2px var(--color-shoal);
+}
+
 /* ── Sorting table ────────────────────────────────────────────────────────
    The same idea as .pin, one step earlier in the process: before a photo is a
    marker on the chart it's a loose print waiting to be filed. Prints are dealt
@@ -550,8 +580,8 @@ body {
   clip-path: xywh(0px 0em 100% 100%);
 }
 .reaction:hover {
-  margin-top:2px;
-  transform: translateY(-2px);
+  /* margin-top:2px; */
+  /* transform: translateY(-2px); */
   border-color: var(--color-haze);
 }
 .reaction[data-mine="true"] {

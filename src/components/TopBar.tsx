@@ -16,11 +16,18 @@ export default function TopBar({
   people,
   unplacedCount,
   onShowUnplaced,
+  canMerge,
+  merging,
+  onToggleMerge,
 }: {
   centre: { lat: number; lng: number } | null;
   people: PersonDTO[];
   unplacedCount: number;
   onShowUnplaced: () => void;
+  /** False when there's nothing to consolidate — fewer than two placed photos. */
+  canMerge?: boolean;
+  merging?: boolean;
+  onToggleMerge?: () => void;
 }) {
   const router = useRouter();
 
@@ -48,6 +55,38 @@ export default function TopBar({
         ))}
       </Link>
       
+      {canMerge && onToggleMerge && (
+        <button
+          type="button"
+          onClick={onToggleMerge}
+          className="reaction"
+          data-mine={merging}
+          aria-pressed={merging}
+          title="Merge pins that are really the same place"
+        >
+          <span className="glyph">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="8" cy="8" r="2.1" stroke="currentColor" strokeWidth="1.4" />
+              <path
+                d="M1.4 8h3.2M4.2 6.4L5.8 8 4.2 9.6"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M14.6 8h-3.2M11.8 6.4L10.2 8l1.6 1.6"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <span className="hidden sm:inline">{merging ? "Merging" : "Merge"}</span>
+        </button>
+      )}
+
       {unplacedCount > 0 && (
         <button
           type="button"

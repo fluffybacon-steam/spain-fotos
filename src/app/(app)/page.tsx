@@ -6,9 +6,12 @@ import MapCanvas from "@/components/MapCanvas";
 import PhotoPanel from "@/components/PhotoPanel";
 import PlacePicker from "@/components/PlacePicker";
 import Lightbox from "@/components/Lightbox";
+import MergeSheet from "@/components/MergeSheet";
 import TopBar from "@/components/TopBar";
-import { isLocated, nearestNamed, type NamedPlace } from "@/lib/places";
+import { groupByPin, isLocated, nearestNamed, type NamedPlace } from "@/lib/places";
 import { PRESET_PLACES } from "@/lib/preset-places";
+import { PIN_PARAM, takePinTargets } from "@/lib/pin-handoff";
+import { writeLocation } from "@/lib/client/place-photos";
 import type { PersonDTO, PhotoDTO } from "@/types";
 
 export default function MapPage() {
@@ -23,11 +26,20 @@ export default function MapPage() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
   // `mode` only affects wording and where Cancel returns to: "place" came from
-  // the unplaced list and should fall back to it, "move" came from the viewer
-  // and has no list to go back to.
-  const [pinFor, setPinFor] = useState<{ ids: string[]; mode: "place" | "move" } | null>(null);
+  // the unplaced list and should fall back to it, "merge" came from the merge
+  // sheet and should reopen it, "move" came from the viewer and has no list to
+  // go back to.
+  const [pinFor, setPinFor] = useState<{
+    ids: string[];
+    mode: "place" | "move" | "merge";
+  } | null>(null);
   const [naming, setNaming] = useState<{ lat: number; lng: number; ids: string[] } | null>(null);
   const [placeName, setPlaceName] = useState("");
+  // null = not merging. A Set rather than a list of pins because a pin isn't a
+  // thing the app stores — it's whatever photos happen to share a coordinate,
+  // and that regroups the moment a merge lands.
+  const [mergeIds, setMergeIds] = useState<Set<string> | null>(null);
+  const [choosingSpot, setChoosingSpot] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -45,6 +57,23 @@ export default function MapPage() {
       if (placeRes.ok) setNamedPlaces((await placeRes.json()).places);
       setLoading(false);
     })();
+  }, []);
+
+  /**
+   * Browse sends a bulk selection here to be pinned by hand. Read straight off
+   * `window.location` rather than through `useSearchParams`, which would drag
+   * this whole client page under a Suspense boundary for one query flag.
+   *
+   * The flag is stripped immediately, so a reload — or a back-navigation an
+   * hour later — doesn't drop the user into pick mode again.
+   */
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get(PIN_PARAM) !== "1") return;
+    url.searchParams.delete(PIN_PARAM);
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    const ids = takePinTargets();
+    if (ids.length) setPinFor({ ids, mode: "move" });
   }, []);
 
   // Presets are always available for naming, even before anyone saves one.
@@ -79,45 +108,111 @@ export default function MapPage() {
     setLightboxIndex(selection.length === 1 ? startIndex : null);
   }, []);
 
-  /** Optimistic bulk move, rolled back as a group if the write fails. */
+  /**
+   * Optimistic bulk move, rolled back per id against what the server actually
+   * wrote. Resolves false when nothing moved at all — a refusal is a normal
+   * outcome here rather than an exception, and the callers that can show it
+   * (the merge sheet) need to tell it apart from a partial success.
+   */
   const applyLocation = useCallback(
-    async (ids: string[], lat: number, lng: number) => {
+    async (ids: string[], lat: number, lng: number): Promise<boolean> => {
       const before = photos.filter((p) => ids.includes(p.id));
       setPhotos((prev) =>
         prev.map((p) => (ids.includes(p.id) ? { ...p, lat, lng, locationSource: "manual" } : p)),
       );
 
-      const res = await fetch("/api/photos/location", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, lat, lng }),
-      });
-
-      // The route answers 200 with the ids it actually wrote — the permission
-      // rule skips rows rather than failing the request, so a photo someone else
-      // already placed comes back missing from `updated`. Trusting the status
-      // alone would leave that photo showing a pin the server never stored.
-      let updated: string[] = [];
-      if (res.ok) {
-        const body = (await res.json().catch(() => null)) as { updated?: string[] } | null;
-        updated = body?.updated ?? [];
-      }
-      const wrote = new Set(updated);
+      // Reconciled against the ids the server says it wrote, not the status:
+      // the route skips rows rather than failing the request, so a refusal
+      // comes back as a short list on a 200. Chunking lives in writeLocation,
+      // since a merge of two busy pins can exceed the route's 200-id cap.
+      const wrote = await writeLocation(ids, lat, lng);
 
       if (wrote.size !== ids.length) {
         const restore = new Map(before.filter((p) => !wrote.has(p.id)).map((p) => [p.id, p]));
         setPhotos((prev) => prev.map((p) => restore.get(p.id) ?? p));
       }
-      if (!wrote.size) return;
+      if (!wrote.size) return false;
 
-      // Offer to name a spot only where there isn't one already nearby.
+      // Offer to name a spot only where there isn't one already nearby. After a
+      // merge this is the natural moment for it: the reason several pins were
+      // one place is usually a name nobody had written down yet.
       if (!nearestNamed({ lat, lng }, allNames)) {
-        setNaming({ lat, lng, ids: updated });
+        setNaming({ lat, lng, ids: [...wrote] });
         setPlaceName("");
       }
+      return true;
     },
     [photos, allNames],
   );
+
+  // Two photos at one coordinate are one pin, and one pin has nothing to merge
+  // with — the count that gates the control has to be of pins, not photos.
+  const pinCount = useMemo(() => groupByPin(located).length, [located]);
+
+  /** The distinct coordinates behind the current selection, largest pin first. */
+  const mergeGroups = useMemo(
+    () => (mergeIds ? groupByPin(photos.filter((p) => mergeIds.has(p.id))) : []),
+    [mergeIds, photos],
+  );
+
+  const startMerge = useCallback(() => {
+    // The panel and the viewer both sit on top of the map, and the next thing
+    // this user has to do is see the pins.
+    setPanel(null);
+    setLightboxIndex(null);
+    setPicking(false);
+    setMergeIds(new Set());
+  }, []);
+
+  const cancelMerge = useCallback(() => {
+    setMergeIds(null);
+    setChoosingSpot(false);
+  }, []);
+
+  /**
+   * Tapping a marker takes everything behind it, all or nothing. A cluster is
+   * several pins the map happened to draw as one at this zoom, so partially
+   * selecting it would mean selecting something the user can't currently see.
+   */
+  const toggleGroup = useCallback((group: PhotoDTO[]) => {
+    setMergeIds((prev) => {
+      if (!prev) return prev;
+      const next = new Set(prev);
+      const all = group.every((p) => next.has(p.id));
+      for (const p of group) {
+        if (all) next.delete(p.id);
+        else next.add(p.id);
+      }
+      return next;
+    });
+  }, []);
+
+  const mergeInto = useCallback(
+    async (lat: number, lng: number) => {
+      const ids = [...(mergeIds ?? [])];
+      if (!ids.length) return false;
+      const ok = await applyLocation(ids, lat, lng);
+      if (!ok) return false;
+      setMergeIds(null);
+      setChoosingSpot(false);
+      return true;
+    },
+    [mergeIds, applyLocation],
+  );
+
+  // Escape backs out one layer at a time: the destination sheet first, then
+  // merge mode itself. Only while no overlay of its own is up, since those
+  // handle Escape themselves.
+  useEffect(() => {
+    if (!mergeIds || lightboxIndex !== null) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (choosingSpot) setChoosingSpot(false);
+      else cancelMerge();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mergeIds, choosingSpot, lightboxIndex, cancelMerge]);
 
   async function saveName() {
     if (!naming || !placeName.trim()) return setNaming(null);
@@ -143,8 +238,14 @@ export default function MapPage() {
         onPick={(lat, lng) => {
           const task = pinFor;
           setPinFor(null);
-          if (task) void applyLocation(task.ids, lat, lng);
+          if (!task) return;
+          void applyLocation(task.ids, lat, lng);
+          // A tapped point ends a merge as surely as picking one of the pins.
+          if (task.mode === "merge") setMergeIds(null);
         }}
+        mergeMode={Boolean(mergeIds) && !pinFor}
+        mergeSelection={mergeIds ?? undefined}
+        onToggleGroup={toggleGroup}
       />
 
       <TopBar
@@ -155,6 +256,10 @@ export default function MapPage() {
           setPanel(null);
           setPicking(true);
         }}
+        // One pin can't be consolidated with anything.
+        canMerge={pinCount > 1}
+        merging={Boolean(mergeIds)}
+        onToggleMerge={() => (mergeIds ? cancelMerge() : startMerge())}
       />
 
       {loading && (
@@ -178,7 +283,7 @@ export default function MapPage() {
         </div>
       )}
 
-      {picking && unplaced.length > 0 && !pinFor && !naming && (
+      {picking && unplaced.length > 0 && !pinFor && !naming && !mergeIds && (
         <PlacePicker
           unplaced={unplaced}
           located={located}
@@ -224,12 +329,61 @@ export default function MapPage() {
         />
       )}
 
+      {/* Merge tray. Same slot as the pick prompt, and never both at once. */}
+      {mergeIds && !pinFor && !naming && !choosingSpot && (
+        <div className="glass absolute inset-x-2 bottom-2 z-40 flex flex-wrap items-center gap-3 rounded-[4px] px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm">
+              {mergeGroups.length === 0
+                ? "Tap the pins that are really one place"
+                : `${mergeGroups.length} ${mergeGroups.length === 1 ? "pin" : "pins"} · ${
+                    mergeIds.size
+                  } ${mergeIds.size === 1 ? "foto" : "fotos"}`}
+            </p>
+            <p className="coord">
+              {mergeGroups.length < 2
+                ? "Zoom in until they separate, then pick at least two"
+                : "They'll all move to one spot you choose next"}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={mergeGroups.length < 2}
+            onClick={() => setChoosingSpot(true)}
+          >
+            Choose spot
+          </button>
+          <button type="button" className="btn btn-quiet btn-sm" onClick={cancelMerge}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {choosingSpot && mergeGroups.length > 1 && (
+        <MergeSheet
+          groups={mergeGroups}
+          namedPlaces={allNames}
+          onMerge={mergeInto}
+          onPickOnMap={() => {
+            if (!mergeIds) return;
+            setChoosingSpot(false);
+            setPinFor({ ids: [...mergeIds], mode: "merge" });
+          }}
+          onClose={() => setChoosingSpot(false)}
+        />
+      )}
+
       {pinFor && (
         <div className="glass absolute inset-x-2 bottom-2 z-40 flex items-center gap-3 rounded-[4px] px-3 py-2.5">
           <p className="flex-1 text-sm">
-            {pinFor.mode === "move"
-              ? "Tap the map to move this foto"
-              : `Tap the map to place ${pinFor.ids.length} ${pinFor.ids.length === 1 ? "foto" : "fotos"}`}
+            {pinFor.mode === "place"
+              ? `Tap the map to place ${pinFor.ids.length} ${pinFor.ids.length === 1 ? "foto" : "fotos"}`
+              : pinFor.mode === "merge"
+                ? `Tap the map to merge ${pinFor.ids.length} fotos there`
+                : `Tap the map to move ${
+                    pinFor.ids.length === 1 ? "this foto" : `these ${pinFor.ids.length} fotos`
+                  }`}
           </p>
           <button
             type="button"
@@ -237,9 +391,11 @@ export default function MapPage() {
             onClick={() => {
               const mode = pinFor.mode;
               setPinFor(null);
-              // Reopening the unplaced list is only right for a first placement;
-              // a move started from the viewer has nothing to go back to.
+              // Each mode goes back where it came from: the unplaced list for a
+              // first placement, the destination sheet for a merge. A move
+              // started from the viewer has nothing to go back to.
               if (mode === "place") setPicking(true);
+              if (mode === "merge") setChoosingSpot(true);
             }}
           >
             Cancel

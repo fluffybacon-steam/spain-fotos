@@ -13,24 +13,42 @@ type Props = {
   /** When set, the next map click reports a coordinate instead of doing nothing. */
   pickMode?: boolean;
   onPick?: (lat: number, lng: number) => void;
+  /**
+   * Merge mode: tapping a pin or a cluster selects everything behind it rather
+   * than opening it. The map is the only place you can see that two pins are
+   * forty metres apart, so it's the only place the choice can be made.
+   */
+  mergeMode?: boolean;
+  /** Photo ids currently selected for a merge. */
+  mergeSelection?: Set<string>;
+  onToggleGroup?: (photos: PhotoDTO[]) => void;
 };
 
 // Fallback view: the western Mediterranean, wide enough to hold mainland Spain
 // and the Balearics together. Only used before any located photo exists.
 const FALLBACK = { center: { lat: 39.6, lng: 2.6 }, zoom: 6 };
 
-export default function MapCanvas({ photos, onOpen, onCenterChange, pickMode, onPick }: Props) {
+export default function MapCanvas({
+  photos,
+  onOpen,
+  onCenterChange,
+  pickMode,
+  onPick,
+  mergeMode,
+  mergeSelection,
+  onToggleGroup,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const clustererRef = useRef<MarkerClusterer | null>(null);
   const markerPhoto = useRef(new Map<google.maps.marker.AdvancedMarkerElement, PhotoDTO>());
   const clusterPhotos = useRef(new Map<HTMLElement, PhotoDTO[]>());
-  const handlers = useRef({ onOpen, onPick, pickMode });
+  const handlers = useRef({ onOpen, onPick, pickMode, mergeMode, mergeSelection, onToggleGroup });
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorText, setErrorText] = useState("");
 
   // Keep the latest callbacks reachable from listeners registered once.
-  handlers.current = { onOpen, onPick, pickMode };
+  handlers.current = { onOpen, onPick, pickMode, mergeMode, mergeSelection, onToggleGroup };
 
   useEffect(() => {
     let cancelled = false;
@@ -124,16 +142,33 @@ export default function MapCanvas({ photos, onOpen, onCenterChange, pickMode, on
         gmpClickable: true,
       });
 
+      // What a tap means depends on the mode, and the mode is read at tap time
+      // rather than captured here: these listeners are registered once per
+      // photo and outlive several passes through merge mode.
+      //
+      // In pick mode a pin reports its own coordinate rather than opening.
+      // Markers sit on top of the map and swallow the click, so tapping the one
+      // spot you're aiming for used to be the one place the map didn't respond
+      // — and "put it exactly where that photo is" is the commonest thing
+      // anyone wants when merging pins by hand.
+      const activate = () => {
+        const h = handlers.current;
+        if (h.pickMode) h.onPick?.(photo.lat, photo.lng);
+        else if (h.mergeMode) h.onToggleGroup?.([photo]);
+        else h.onOpen([photo], 0);
+      };
+
       // AdvancedMarkerElement dispatches gmp-click rather than the legacy
       // 'click' event; keyboard activation needs its own listener.
-      marker.addListener("gmp-click", () => handlers.current.onOpen([photo], 0));
+      marker.addListener("gmp-click", activate);
       el.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          handlers.current.onOpen([photo], 0);
+          activate();
         }
       });
 
+      paintMergeState(el, [photo], mergeMode, mergeSelection);
       markerPhoto.current.set(marker, photo);
       return marker;
     });
@@ -170,6 +205,9 @@ export default function MapCanvas({ photos, onOpen, onCenterChange, pickMode, on
         badge.textContent = String(count);
         el.appendChild(badge);
 
+        // A cluster element is built fresh on every zoom and pan, so its merge
+        // state has to come from the ref rather than from a React render.
+        paintMergeState(el, contents, handlers.current.mergeMode, handlers.current.mergeSelection);
         clusterPhotos.current.set(el, contents);
 
         return new google.maps.marker.AdvancedMarkerElement({
@@ -193,7 +231,13 @@ export default function MapCanvas({ photos, onOpen, onCenterChange, pickMode, on
           ? ((cluster.marker as google.maps.marker.AdvancedMarkerElement).content as HTMLElement)
           : null;
         const contents = el ? clusterPhotos.current.get(el) : undefined;
-        if (contents?.length) handlers.current.onOpen(contents, 0);
+        if (!contents?.length) return;
+        const h = handlers.current;
+        // A cluster's own position is the average of its members, which is the
+        // honest answer to "there" when the stack covers several coordinates.
+        if (h.pickMode) h.onPick?.(cluster.position.lat(), cluster.position.lng());
+        else if (h.mergeMode) h.onToggleGroup?.(contents);
+        else h.onOpen(contents, 0);
       },
     });
 
@@ -205,6 +249,23 @@ export default function MapCanvas({ photos, onOpen, onCenterChange, pickMode, on
       map.set("cala:framed", true);
     }
   }, [photos, status]);
+
+  /**
+   * Repaints selection state without rebuilding any markers.
+   *
+   * Asking the clusterer to re-render would be the obvious route and doesn't
+   * work: its render() only redraws when the algorithm reports the *clusters*
+   * changed, and selecting a pin doesn't change any cluster. The elements are
+   * still on screen, so they're written to directly.
+   */
+  useEffect(() => {
+    for (const [marker, photo] of markerPhoto.current) {
+      paintMergeState(marker.content as HTMLElement | null, [photo], mergeMode, mergeSelection);
+    }
+    for (const [el, contents] of clusterPhotos.current) {
+      paintMergeState(el, contents, mergeMode, mergeSelection);
+    }
+  }, [mergeMode, mergeSelection, photos, status]);
 
   return (
     <div className="absolute inset-0">
@@ -231,9 +292,30 @@ export default function MapCanvas({ photos, onOpen, onCenterChange, pickMode, on
 
       {pickMode && (
         <div className="pointer-events-none absolute inset-x-0 top-20 grid place-items-center">
-          <p className="glass rounded-[3px] px-4 py-2 text-sm">Tap the map to place this photo</p>
+          <p className="glass rounded-[3px] px-4 py-2 text-sm">
+            Tap the map — or an existing pin to use its exact spot
+          </p>
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * A pin or cluster counts as selected only when every photo behind it is — a
+ * half-selected cluster shouldn't look like a decision that's been made.
+ */
+function paintMergeState(
+  el: HTMLElement | null | undefined,
+  contents: PhotoDTO[],
+  mergeMode: boolean | undefined,
+  selection: Set<string> | undefined,
+) {
+  if (!el) return;
+  el.dataset.merge = mergeMode ? "true" : "false";
+  const all =
+    Boolean(mergeMode) &&
+    contents.length > 0 &&
+    contents.every((p) => selection?.has(p.id));
+  el.dataset.selected = all ? "true" : "false";
 }

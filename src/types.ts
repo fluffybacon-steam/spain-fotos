@@ -26,6 +26,8 @@ export type PhotoDTO = {
   commentCount: number;
   reactions: Record<ReactionKind, number>;
   myReaction: ReactionKind | null;
+  /** Whether the signed-in user has starred this. Private to them. */
+  isFavorite: boolean;
 };
 
 export type CommentDTO = {

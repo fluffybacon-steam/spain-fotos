@@ -52,6 +52,7 @@ export default function Lightbox({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [commentCount, setCommentCount] = useState<number | null>(null);
+  const [favBusy, setFavBusy] = useState(false);
   const [editingTime, setEditingTime] = useState(false);
   const [timeDraft, setTimeDraft] = useState("");
   const [savingTime, setSavingTime] = useState(false);
@@ -71,6 +72,31 @@ export default function Lightbox({
     if (photoId) onToggleSelect?.(photoId);
   }, [photoId, onToggleSelect]);
 
+  /**
+   * Stars the photo for this user alone. Optimistic like ReactionBar, and
+   * rolled back to the object the server still believes in if the write fails —
+   * a star that silently didn't save is worse than one that visibly refused,
+   * because the whole point is finding the photo again later.
+   */
+  const toggleFavorite = useCallback(async () => {
+    if (!photo || favBusy) return;
+    const next = !photo.isFavorite;
+    onPhotoChange({ ...photo, isFavorite: next });
+    setFavBusy(true);
+    try {
+      const res = await fetch(`/api/photos/${photo.id}/favorite`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ favorite: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      onPhotoChange(photo);
+    } finally {
+      setFavBusy(false);
+    }
+  }, [photo, favBusy, onPhotoChange]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       // Arrow keys and Escape belong to whatever field has focus.
@@ -83,6 +109,7 @@ export default function Lightbox({
       else if (e.key === "ArrowLeft") go(-1);
       else if (e.key === "i") setShowMeta((v) => !v);
       else if (e.key === "s") toggleSelect();
+      else if (e.key === "f") void toggleFavorite();
     }
     window.addEventListener("keydown", onKey);
     // Stop the page behind from scrolling while the lightbox owns the screen.
@@ -92,7 +119,7 @@ export default function Lightbox({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [go, onClose, toggleSelect]);
+  }, [go, onClose, toggleSelect, toggleFavorite]);
 
   // Warm the neighbours so arrowing through feels instant.
   useEffect(() => {
@@ -194,6 +221,31 @@ export default function Lightbox({
             {index + 1} / {photos.length}
           </p>
         </div>
+
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => void toggleFavorite()}
+          aria-label={photo.isFavorite ? "Remove from favorites" : "Add to favorites"}
+          aria-pressed={photo.isFavorite}
+          title={photo.isFavorite ? "In your favorites (f)" : "Add to your favorites (f)"}
+          style={photo.isFavorite ? { color: "var(--color-buoy)" } : undefined}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill={photo.isFavorite ? "currentColor" : "none"}
+            aria-hidden="true"
+          >
+            <path
+              d="M8 2.2l1.72 3.63 3.78.57-2.75 2.8.65 4.02L8 11.32l-3.4 1.9.65-4.02L2.5 6.4l3.78-.57L8 2.2Z"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
 
         {onToggleSelect && (
           <button

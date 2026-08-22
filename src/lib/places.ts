@@ -187,6 +187,62 @@ export function suggestByTime(
   };
 }
 
+/** Photos sharing one exact stored coordinate — that is, one pin on the map. */
+export type PinGroup = Point & { key: string; photos: PhotoDTO[] };
+
+/**
+ * Groups photos by the coordinate they're actually stored at, not by proximity.
+ *
+ * This is the deliberate opposite of clusterPhotos: consolidating pins is about
+ * the difference between two readings 40 m apart, so the grouping has to keep
+ * them apart or there'd be nothing to merge. Six decimal places is ~11 cm —
+ * fine enough that only genuinely identical values collapse, coarse enough that
+ * float formatting can't split one pin in two.
+ *
+ * Sorted by size, so "the pin most of the photos are already at" is first —
+ * that's usually the one worth merging into.
+ */
+export function groupByPin(photos: PhotoDTO[]): PinGroup[] {
+  const groups = new Map<string, PinGroup>();
+  for (const photo of photos) {
+    if (!isLocated(photo)) continue;
+    const key = `${photo.lat.toFixed(6)},${photo.lng.toFixed(6)}`;
+    const existing = groups.get(key);
+    if (existing) existing.photos.push(photo);
+    else groups.set(key, { key, lat: photo.lat, lng: photo.lng, photos: [photo] });
+  }
+  return [...groups.values()].sort((a, b) => b.photos.length - a.photos.length);
+}
+
+/**
+ * Unweighted mean of the given points — one vote per pin, not per photo, so a
+ * pin holding forty shots doesn't drag the midpoint onto itself. (Naive across
+ * the antimeridian; this trip is in Spain.)
+ */
+export function midpoint(points: Point[]): Point | null {
+  if (!points.length) return null;
+  const lat = points.reduce((n, p) => n + p.lat, 0) / points.length;
+  const lng = points.reduce((n, p) => n + p.lng, 0) / points.length;
+  return { lat, lng };
+}
+
+/** Widest gap between any two of the given points, in metres. */
+export function maxSpreadMeters(points: Point[]): number {
+  let worst = 0;
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const d = distanceMeters(points[i], points[j]);
+      if (d > worst) worst = d;
+    }
+  }
+  return worst;
+}
+
+export function formatDistance(metres: number): string {
+  if (metres < 1000) return `${Math.round(metres)} m`;
+  return `${(metres / 1000).toFixed(1)} km`;
+}
+
 export function formatGap(minutes: number): string {
   if (minutes < 1) return "less than a minute apart";
   if (minutes < 60) return `${Math.round(minutes)} min apart`;
