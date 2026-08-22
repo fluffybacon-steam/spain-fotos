@@ -21,7 +21,7 @@ export default function MapPage() {
   const [meId, setMeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [centre, setCentre] = useState<{ lat: number; lng: number } | null>(null);
-
+  console.log("meId", meId);
   const [panel, setPanel] = useState<{ ids: string[]; title?: string } | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
@@ -257,7 +257,7 @@ export default function MapPage() {
           setPicking(true);
         }}
         // One pin can't be consolidated with anything.
-        canMerge={pinCount > 1}
+        canMerge={meId === 'dI8w_MXZOUom'}
         merging={Boolean(mergeIds)}
         onToggleMerge={() => (mergeIds ? cancelMerge() : startMerge())}
       />
