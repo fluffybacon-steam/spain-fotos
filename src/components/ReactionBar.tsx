@@ -7,6 +7,7 @@ import type { PhotoDTO } from "@/types";
 
 export const REACTIONS: { kind: ReactionKind; glyph: string; label: string }[] = [
   { kind: "heart", glyph: "❤️", label: "Love it" },
+  { kind: "laugh", glyph:"😂", label: "Very Funny" },
   { kind: "up", glyph: "👍", label: "Good one" },
   { kind: "meh", glyph: "😐", label: "Fine" },
   { kind: "down", glyph: "👎", label: "Not great" },

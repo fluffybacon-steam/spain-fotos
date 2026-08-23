@@ -26,7 +26,7 @@ export default function UploadPage() {
             <strong className="text-foam">Bad news iPhone users</strong>. Ideally, this web app would tag the locations of your photos automagically using the metadata.
             But because Apple is a snob about privacy, they strips that shit from any website that asks for photo shares.
           </li>
-          <li>
+          <li style={{fontSize: '1.5rem'}}>
             You can test your images metadata <Link className="underline text-foam" href='/debug'>here</Link> before uploading
           </li>
           <li>

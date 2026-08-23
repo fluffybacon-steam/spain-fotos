@@ -7,12 +7,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import Lightbox from "@/components/Lightbox";
+import { REACTIONS } from "@/components/ReactionBar";
 import LocationSheet from "@/components/LocationSheet";
 import { PRESET_PLACES } from "@/lib/preset-places";
 import { isLocated, type NamedPlace } from "@/lib/places";
 import { PIN_PARAM, stashPinTargets } from "@/lib/pin-handoff";
 import { writeLocation } from "@/lib/client/place-photos";
 import { formatDuration } from "@/lib/client/video";
+import type { ReactionKind } from "@/db/schema";
 import type { PersonDTO, PhotoDTO } from "@/types";
 
 const KB = 1024;
@@ -49,12 +51,34 @@ async function downloadEach(
 }
 
 /**
- * Which slice of the gallery is on screen. One row of chips, one of them lit:
- * modelling it as a union rather than a couple of booleans is what stops
- * "Favorites" and "Bryan" from ever being on at the same time and quietly
- * meaning "Bryan's favorites", which is not a thing this app has.
+ * Two independent filters, one row of chips each, combined with AND.
+ *
+ * Who took it is one question and what's on it is another, so they get a row
+ * apiece rather than competing for one: Abby + 😂 is "Abby's photos that
+ * somebody laughed at", which is the whole point of splitting them.
+ *
+ * Within a row the choice is exclusive — 😂 + ❤️ would have to mean either
+ * "both reactions" or "either reaction" and there's no way for a lit chip to
+ * say which, so the row stays a radio group. Tapping the lit chip clears it.
  */
-type View = { kind: "all" } | { kind: "favorites" } | { kind: "person"; id: string };
+type Mark =
+  | { kind: "any" }
+  | { kind: "favorites" }
+  | { kind: "reaction"; reaction: ReactionKind };
+
+/**
+ * A reaction filter asks whether *anyone* left it, not whether you did — the
+ * tally in the DTO counts every user's reaction, and "one person laughed at
+ * this" is the interesting fact. A star is the opposite: private by
+ * construction, so it can only ever mean yours.
+ */
+function matchesMark(photo: PhotoDTO, mark: Mark): boolean {
+  if (mark.kind === "any") return true;
+  if (mark.kind === "favorites") return photo.isFavorite;
+  return (photo.reactions[mark.reaction] ?? 0) > 0;
+}
+
+const NO_TALLY = { n: 0, bytes: 0 };
 
 export default function BrowsePage() {
   const router = useRouter();
@@ -63,7 +87,8 @@ export default function BrowsePage() {
   const [namedPlaces, setNamedPlaces] = useState<NamedPlace[]>([]);
   const [meId, setMeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<View>({ kind: "all" });
+  const [owner, setOwner] = useState<string | null>(null); // null = everyone
+  const [mark, setMark] = useState<Mark>({ kind: "any" });
   const [index, setIndex] = useState<number | null>(null);
 
   // Multi-select
@@ -91,11 +116,12 @@ export default function BrowsePage() {
     })();
   }, []);
 
-  const shown = useMemo(() => {
-    if (view.kind === "favorites") return photos.filter((p) => p.isFavorite);
-    if (view.kind === "person") return photos.filter((p) => p.ownerId === view.id);
-    return photos;
-  }, [photos, view]);
+  const shown = useMemo(
+    () => photos.filter((p) => (!owner || p.ownerId === owner) && matchesMark(p, mark)),
+    [photos, owner, mark],
+  );
+
+  const filtered = Boolean(owner) || mark.kind !== "any";
 
   const allNames = useMemo(() => [...PRESET_PLACES, ...namedPlaces], [namedPlaces]);
 
@@ -103,31 +129,58 @@ export default function BrowsePage() {
   // offer when moving a selection are the trip's, not the current filter's.
   const located = useMemo(() => photos.filter(isLocated), [photos]);
 
-  // Storage used, derived straight from the full photo list: one total for the
-  // "Everyone" chip and a per-owner breakdown for the individual chips.
-  const { totalMemory, memoryByOwner } = useMemo(() => {
+  /**
+   * Every chip is counted against the *other* row's filter, so its number is
+   * the answer to "how many photos would tapping this leave?" — pick 😂 and
+   * Abby's chip drops to her laughed-at photos. Counting each row against
+   * itself instead would light a chip up saying 284 and then show you nine.
+   *
+   * Chips never disappear at zero. A row that reshuffles as you tap it is hard
+   * to aim at, and "Megan has nothing starred" is worth seeing.
+   */
+  const ownerTally = useMemo(() => {
     let total = 0;
-    const byOwner = new Map<string, number>();
+    let totalBytes = 0;
+    const byOwner = new Map<string, { n: number; bytes: number }>();
     for (const p of photos) {
+      if (!matchesMark(p, mark)) continue;
       const bytes = p.originalBytes ?? 0;
-      total += bytes;
-      byOwner.set(p.ownerId, (byOwner.get(p.ownerId) ?? 0) + bytes);
+      total += 1;
+      totalBytes += bytes;
+      const cur = byOwner.get(p.ownerId) ?? { n: 0, bytes: 0 };
+      cur.n += 1;
+      cur.bytes += bytes;
+      byOwner.set(p.ownerId, cur);
     }
-    return { totalMemory: formatBytes(total), memoryByOwner: byOwner };
-  }, [photos]);
+    return { total, totalBytes, byOwner };
+  }, [photos, mark]);
 
-  // The favorites chip carries its own count and size for the same reason the
-  // people chips do — it's the only clue about what's behind it.
-  const { favoriteCount, favoriteMemory } = useMemo(() => {
-    let n = 0;
-    let bytes = 0;
+  const markTally = useMemo(() => {
+    let total = 0;
+    let totalBytes = 0;
+    const favorites = { n: 0, bytes: 0 };
+    const byReaction = new Map<ReactionKind, { n: number; bytes: number }>();
     for (const p of photos) {
-      if (!p.isFavorite) continue;
-      n += 1;
-      bytes += p.originalBytes ?? 0;
+      if (owner && p.ownerId !== owner) continue;
+      const bytes = p.originalBytes ?? 0;
+      total += 1;
+      totalBytes += bytes;
+      if (p.isFavorite) {
+        favorites.n += 1;
+        favorites.bytes += bytes;
+      }
+      // Driven by REACTIONS rather than a list of kinds spelled out here, so
+      // adding an emoji to the bar adds its filter chip and this count with it.
+      for (const { kind } of REACTIONS) {
+        if ((p.reactions[kind] ?? 0) === 0) continue;
+        const cur = byReaction.get(kind) ?? { n: 0, bytes: 0 };
+        cur.n += 1;
+        cur.bytes += bytes;
+        byReaction.set(kind, cur);
+      }
     }
-    return { favoriteCount: n, favoriteMemory: formatBytes(bytes) };
-  }, [photos]);
+    return { total, totalBytes, favorites, byReaction };
+  }, [photos, owner]);
 
   // Photos arrive newest-first; group them under a date heading so scrolling a
   // long trip stays legible rather than becoming an undifferentiated wall.
@@ -297,60 +350,88 @@ export default function BrowsePage() {
       </div>
 
       {/* Who took it. Horizontally scrollable so it survives a big group. */}
-      <div className="scroll-slim -mx-1 mb-4 flex gap-1.5 px-1 pb-1 overflow-x-scroll overflow-y-visible">
+      <div className="scroll-slim -mx-1 mb-1.5 flex gap-1.5 px-1 pb-1 overflow-x-scroll overflow-y-visible">
         <button
           type="button"
-          className={
-            view.kind === "all" && photos.length > 0 ? "reaction active shrink-0" : "reaction shrink-0"
-          }
-          data-mine={view.kind === "all"}
-          onClick={() => setView({ kind: "all" })}
+          className={!owner && photos.length > 0 ? "reaction active shrink-0" : "reaction shrink-0"}
+          data-mine={!owner}
+          onClick={() => setOwner(null)}
         >
           <span>Todo</span>
-          <span>{photos.length}</span>
-          <span className="memory">{totalMemory}</span>
+          <span>{ownerTally.total}</span>
+          <span className="memory">{formatBytes(ownerTally.totalBytes)}</span>
         </button>
-        {/* Shown even at zero: it's the only place the feature announces
-            itself, and an empty list explains where the star lives. */}
+        {people
+          .filter((p) => p.photoCount > 0)
+          .map((person) => {
+            const tally = ownerTally.byOwner.get(person.id) ?? NO_TALLY;
+            const on = owner === person.id;
+            return (
+              <button
+                key={person.id}
+                type="button"
+                className={on ? "reaction active shrink-0" : "reaction shrink-0"}
+                data-mine={on}
+                onClick={() => setOwner(on ? null : person.id)}
+              >
+                {/* Avatar greys itself at zero, which is exactly the signal
+                    wanted here: nothing of Megan's carries that mark. */}
+                <Avatar url={person.avatarUrl} name={person.name} size={18} count={tally.n} />
+                <span className="max-w-28 truncate">{person.name}</span>
+                <span>{tally.n}</span>
+                <span className="memory">{formatBytes(tally.bytes)}</span>
+              </button>
+            );
+          })}
+      </div>
+
+      {/* What's on it: your star, or a reaction anyone left. Second row, second
+          question — this one narrows whatever the row above has selected. */}
+      <div className="scroll-slim -mx-1 mb-4 flex gap-1.5 px-1 pb-1 overflow-x-scroll overflow-y-visible">
+        {/* <button
+          type="button"
+          className={
+            mark.kind === "any" && photos.length > 0 ? "reaction active shrink-0" : "reaction shrink-0"
+          }
+          data-mine={mark.kind === "any"}
+          onClick={() => setMark({ kind: "any" })}
+          title="Starred or not, reacted to or not"
+        >
+          <span>Any</span>
+          <span>{markTally.total}</span>
+          <span className="memory">{formatBytes(markTally.totalBytes)}</span>
+        </button> */}
         <button
           type="button"
-          className={view.kind === "favorites" ? "reaction active shrink-0" : "reaction shrink-0"}
-          data-mine={view.kind === "favorites"}
+          className={mark.kind === "favorites" ? "reaction active shrink-0" : "reaction shrink-0"}
+          data-mine={mark.kind === "favorites"}
           onClick={() =>
-            setView((v) => (v.kind === "favorites" ? { kind: "all" } : { kind: "favorites" }))
+            setMark((m) => (m.kind === "favorites" ? { kind: "any" } : { kind: "favorites" }))
           }
           title="Only the fotos you starred. Everyone's list is their own."
         >
           <span className="glyph">⭐</span>
-          <span>{favoriteCount}</span>
-          <span className="memory">{favoriteMemory}</span>
+          <span>{markTally.favorites.n}</span>
+          <span className="memory">{formatBytes(markTally.favorites.bytes)}</span>
         </button>
-        {people
-          .filter((p) => p.photoCount > 0)
-          .map((person) => (
+        {REACTIONS.map(({ kind, glyph: emoji, label }) => {
+          const tally = markTally.byReaction.get(kind) ?? NO_TALLY;
+          const on = mark.kind === "reaction" && mark.reaction === kind;
+          return (
             <button
-              key={person.id}
+              key={kind}
               type="button"
-              className={
-                view.kind === "person" && view.id === person.id
-                  ? "reaction active shrink-0"
-                  : "reaction shrink-0"
-              }
-              data-mine={view.kind === "person" && view.id === person.id}
-              onClick={() =>
-                setView((v) =>
-                  v.kind === "person" && v.id === person.id
-                    ? { kind: "all" }
-                    : { kind: "person", id: person.id },
-                )
-              }
+              className={on ? "reaction active shrink-0" : "reaction shrink-0"}
+              data-mine={on}
+              onClick={() => setMark(on ? { kind: "any" } : { kind: "reaction", reaction: kind })}
+              title={`${label} — from anyone, not just you`}
             >
-              <Avatar url={person.avatarUrl} name={person.name} size={18} count={person.photoCount} />
-              <span className="max-w-28 truncate">{person.name}</span>
-              <span>{person.photoCount}</span>
-              <span className="memory">{formatBytes(memoryByOwner.get(person.id) ?? 0)}</span>
+              <span className="glyph">{emoji}</span>
+              <span>{tally.n}</span>
+              <span className="memory">{formatBytes(tally.bytes)}</span>
             </button>
-          ))}
+          );
+        })}
       </div>
 
       {loading && <p className="coord animate-pulse px-1">Loading gallery</p>}
@@ -359,18 +440,32 @@ export default function BrowsePage() {
         <div className="glass mt-10 rounded-[4px] p-6 text-center">
           <p className="eyebrow">Nothing to show</p>
           <h2 className="mt-2 font-display text-xl font-bold">
-            {view.kind === "favorites"
-              ? "Nothing starred yet"
-              : view.kind === "person"
-                ? "No photos from them yet"
-                : "No photos uploaded yet"}
+            {photos.length === 0
+              ? "No photos uploaded yet"
+              : mark.kind === "favorites" && !owner
+                ? "Nothing starred yet"
+                : "Nothing matches both filters"}
           </h2>
-          {view.kind === "favorites" ? (
-            <p className="coord mt-2">Open a foto and tap the star to keep it here</p>
-          ) : (
+          {/* With two rows combining, an empty gallery is usually a
+              combination rather than a shortage — so the way out is a reset,
+              not an invitation to upload. */}
+          {photos.length === 0 ? (
             <Link href="/upload" className="btn btn-primary mt-4">
               Add fotos
             </Link>
+          ) : mark.kind === "favorites" && !owner ? (
+            <p className="coord mt-2">Open a foto and tap the star to keep it here</p>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-quiet mt-4"
+              onClick={() => {
+                setOwner(null);
+                setMark({ kind: "any" });
+              }}
+            >
+              Clear filters
+            </button>
           )}
         </div>
       )}
@@ -442,7 +537,7 @@ export default function BrowsePage() {
                       <span className="grid h-7 w-7 place-items-center rounded-full bg-deep/70 text-[10px]">▶</span>
                     </span>
                   )}
-                  {view.kind !== "person" && !selectMode && (
+                  {!owner && !selectMode && (
                     <span className="absolute bottom-1 left-1 opacity-0 transition-opacity group-hover:opacity-100">
                       <Avatar url={photo.ownerAvatarUrl} name={photo.ownerName} size={18} />
                     </span>
@@ -553,6 +648,11 @@ export default function BrowsePage() {
   );
 }
 
+/**
+ * Looked up from REACTIONS rather than kept as a second copy of the table:
+ * this is the badge on the tile, and a hardcoded map here means every new
+ * emoji in the bar silently renders as nothing until someone remembers.
+ */
 function glyph(kind: string) {
-  return { heart: "❤️", up: "👍", meh: "😐", down: "👎", poo: "💩" }[kind] ?? "";
+  return REACTIONS.find((r) => r.kind === kind)?.glyph ?? "";
 }

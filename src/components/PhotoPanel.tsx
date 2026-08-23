@@ -3,6 +3,7 @@
 
 import type { PhotoDTO } from "@/types";
 import Avatar from "./Avatar";
+import { REACTIONS } from "./ReactionBar";
 
 /**
  * Sits over the map: a bottom sheet on phones, a side panel on wide screens.
@@ -88,6 +89,7 @@ export default function PhotoPanel({
   );
 }
 
+/** Same table as the reaction bar, so a new emoji shows up here too. */
 function reactionGlyph(kind: string) {
-  return { heart: "❤️", up: "👍", meh: "😐", down: "👎", poo: "💩" }[kind] ?? "";
+  return REACTIONS.find((r) => r.kind === kind)?.glyph ?? "";
 }
