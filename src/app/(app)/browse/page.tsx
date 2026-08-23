@@ -84,6 +84,7 @@ export default function BrowsePage() {
         const data = await meRes.json();
         setPeople(data.people);
         setMeId(data.me?.uid ?? null);
+        console.log("me", data.me, "people", data.people);
       }
       if (placeRes.ok) setNamedPlaces((await placeRes.json()).places);
       setLoading(false);
@@ -268,6 +269,8 @@ export default function BrowsePage() {
   function updatePhoto(updated: PhotoDTO) {
     setPhotos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   }
+
+  console.log('lightbox freeloader test' , people.filter((person) => person.id == meId).some((person) => person.photoCount === 320))
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-5xl px-3 py-5">
@@ -536,6 +539,7 @@ export default function BrowsePage() {
           onIndexChange={setIndex}
           onPhotoChange={updatePhoto}
           meId={meId ?? undefined}
+          freeloader={people.filter((person) => person.id == meId).some((person) => person.photoCount === 320) }
           onDeleted={removePhoto}
           namedPlaces={allNames}
           selected={selected.has(shown[index].id)}

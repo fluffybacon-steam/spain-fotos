@@ -18,6 +18,7 @@ type Props = {
   namedPlaces?: NamedPlace[];
   /** Signed-in user id, so the owner sees a delete control. */
   meId?: string;
+  freeloader?: boolean;
   onDeleted?: (photoId: string) => void;
   /**
    * Hand this photo back to the map so its owner can drop the pin again.
@@ -39,6 +40,7 @@ export default function Lightbox({
   onPhotoChange,
   namedPlaces = [],
   meId,
+  freeloader,
   onDeleted,
   onRepin,
   selected = false,
@@ -206,8 +208,15 @@ export default function Lightbox({
     setEditingTime(true);
   }
 
+  console.log("freeloader", freeloader);
+
   return (
     <div className="lightbox-backdrop" role="dialog" aria-modal="true" aria-label="Photo viewer">
+      {freeloader && (
+        <div className="frogbutt" >
+          <img src='/frogbutt.png'/>
+        </div>
+      )}
       {/* Header */}
       <header className="flex items-center gap-3 px-3 py-2.5">
         <button type="button" className="icon-btn" onClick={onClose} aria-label="Close viewer">
