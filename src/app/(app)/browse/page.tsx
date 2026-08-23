@@ -270,7 +270,6 @@ export default function BrowsePage() {
     setPhotos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   }
 
-  console.log('lightbox freeloader test' , people.filter((person) => person.id == meId).some((person) => person.photoCount === 320))
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-5xl px-3 py-5">
@@ -539,7 +538,7 @@ export default function BrowsePage() {
           onIndexChange={setIndex}
           onPhotoChange={updatePhoto}
           meId={meId ?? undefined}
-          freeloader={people.filter((person) => person.id == meId).some((person) => person.photoCount === 320) }
+          freeloader={people.filter((person) => person.id == meId).some((person) => person.photoCount === 0) }
           onDeleted={removePhoto}
           namedPlaces={allNames}
           selected={selected.has(shown[index].id)}
