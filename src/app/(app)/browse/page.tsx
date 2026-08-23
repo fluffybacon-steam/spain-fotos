@@ -538,7 +538,7 @@ export default function BrowsePage() {
           onIndexChange={setIndex}
           onPhotoChange={updatePhoto}
           meId={meId ?? undefined}
-          freeloader={people.filter((person) => person.id == meId).some((person) => person.photoCount === 0) }
+          freeloader={people.filter((person) => person.id == meId).some((person) => person.photoCount < 4) }
           onDeleted={removePhoto}
           namedPlaces={allNames}
           selected={selected.has(shown[index].id)}
