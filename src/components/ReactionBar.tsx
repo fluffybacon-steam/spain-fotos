@@ -9,9 +9,10 @@ import { useViewer } from "./Viewer";
 export const REACTIONS: { kind: ReactionKind; glyph: string; label: string }[] = [
   { kind: "heart", glyph: "❤️", label: "Love it" },
   { kind: "laugh", glyph:"😂", label: "Very Funny" },
-  { kind: "up", glyph: "👍", label: "Good one" },
+  { kind: "copycat", glyph: "🗿", label: "Copycat" },
+  { kind: "wow", glyph: "🤩", label: "Wow" },
+  { kind: "cute", glyph: "🥹", label: "Cute" },
   { kind: "meh", glyph: "😐", label: "Fine" },
-  { kind: "down", glyph: "👎", label: "Not great" },
   { kind: "poo", glyph: "💩", label: "Delete this" },
 ];
 

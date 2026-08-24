@@ -77,9 +77,11 @@ export default function PhotoPanel({
             <span className="absolute bottom-1 left-1 opacity-0 transition-opacity group-hover:opacity-100">
               <Avatar url={photo.ownerAvatarUrl} name={photo.ownerName} size={20} />
             </span>
-            {photo.myReaction && (
+            {/* Falsy for a kind that's been retired from the bar while its
+                rows are still in the table. */}
+            {reactionGlyph(photo.myReaction ?? "") && (
               <span className="absolute right-1 top-1 text-xs drop-shadow">
-                {reactionGlyph(photo.myReaction)}
+                {reactionGlyph(photo.myReaction!)}
               </span>
             )}
           </button>

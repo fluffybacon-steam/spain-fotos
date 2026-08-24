@@ -137,7 +137,7 @@ export const favorites = pgTable(
   ],
 );
 
-export const REACTION_KINDS = ["heart", "laugh", "up", "meh", "down", "poo"] as const;
+export const REACTION_KINDS = ["heart", "laugh", "copycat", "wow", "cute", "meh", "poo"] as const;
 export type ReactionKind = (typeof REACTION_KINDS)[number];
 
 export const reactions = pgTable(

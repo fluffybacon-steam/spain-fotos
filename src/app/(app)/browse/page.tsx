@@ -560,7 +560,9 @@ export default function BrowsePage() {
                   )}
                   <span className="absolute right-1 top-1 flex gap-0.5 text-[10px] drop-shadow">
                     {photo.isFavorite && <span title="In your favorites">⭐</span>}
-                    {photo.myReaction && <span>{glyph(photo.myReaction)}</span>}
+                    {/* Empty when the kind has been retired from the bar but
+                        the row is still in the table — no glyph, no badge. */}
+                    {glyph(photo.myReaction ?? "") && <span>{glyph(photo.myReaction!)}</span>}
                     {photo.commentCount > 0 && <span>💬</span>}
                     {photo.mediaType === "video" && photo.durationMs && (
                       <span className="coord">{formatDuration(photo.durationMs)}</span>
