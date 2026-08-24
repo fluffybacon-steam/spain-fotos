@@ -4,7 +4,7 @@ import { asc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db, places } from "@/db";
-import { requireUser, guard } from "@/lib/session";
+import { requireUser, guard, requireMember } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +24,7 @@ const Body = z.object({
 });
 
 export const POST = guard(async (req: Request) => {
-  const me = await requireUser();
+  const me = await requireMember();
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Give the place a name" }, { status: 400 });
 

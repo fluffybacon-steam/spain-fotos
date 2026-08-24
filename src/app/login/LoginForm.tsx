@@ -36,6 +36,30 @@ export default function LoginForm() {
     }
   }
 
+  /**
+   * Starts a view-only session. No credentials, by design — this is the "have a
+   * look" door for someone who was on the trip's group chat but doesn't want an
+   * account. What they get is genuinely read-only: the server refuses every
+   * write from a guest session, not just the buttons.
+   */
+  async function viewOnly() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/guest", { method: "POST" });
+      if (!res.ok) {
+        setError("Couldn't start a view-only session");
+        return;
+      }
+      router.replace(params.get("next") || "/");
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server. Check your connection.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function setPassVisible(){
     const passField = document.querySelector('input[type="password"]') as HTMLInputElement;
     if (passField) {
@@ -83,6 +107,15 @@ export default function LoginForm() {
       <button type="submit" className="btn btn-primary mt-2" disabled={busy}>
         {busy ? "Checking…" : "Sign in"}
       </button>
+
+      {/* type="button" matters inside a form — a stray submit here would post
+          empty credentials and show "that name and password don't match". */}
+      <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void viewOnly()}>
+        Look around without an account
+      </button>
+      <p className="coord text-center">
+        View only: no uploading, commenting or reacting
+      </p>
       </form>
   );
 }

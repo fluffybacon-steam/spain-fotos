@@ -5,7 +5,11 @@ import LoginForm from "./LoginForm";
 import EmojiSky from "@/components/EmojiSky";
 
 export default async function LoginPage() {
-  if (await currentUser()) redirect("/");
+  // Guests are deliberately let through to the form: signing in properly is
+  // how a view-only session is upgraded, and bouncing them home would make the
+  // login screen unreachable without first finding a sign-out button.
+  const me = await currentUser();
+  if (me && me.role !== "guest") redirect("/");
 
   return (
     <main className="relative grid min-h-dvh place-items-center overflow-hidden px-5 py-10">

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, favorites, photos } from "@/db";
-import { requireUser, guard } from "@/lib/session";
+import { guard, requireMember } from "@/lib/session";
 
 export const runtime = "nodejs";
 
@@ -21,7 +21,7 @@ const Body = z.object({ favorite: z.boolean() });
  * caller's own rows.
  */
 export const PUT = guard(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
-  const me = await requireUser();
+  const me = await requireMember();
   const { id } = await ctx.params;
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });

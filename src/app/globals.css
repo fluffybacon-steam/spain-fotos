@@ -862,3 +862,7 @@ li[data-stage="duplicate"] {
     rotate: 0deg;
   }
 }
+
+.grid.unplaced:has(> :nth-last-child(-n+6):first-child) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}

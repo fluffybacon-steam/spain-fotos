@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Avatar from "./Avatar";
+import { useViewer } from "./Viewer";
 import type { CommentDTO } from "@/types";
 
 /** Loads lazily — only when the thread is actually opened for a photo. */
@@ -18,6 +19,7 @@ export default function Comments({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const { canWrite } = useViewer();
 
   useEffect(() => {
     let cancelled = false;
@@ -106,7 +108,7 @@ export default function Comments({
                     })}
                   </p>
                 </div>
-                {c.mine && (
+                {c.mine && canWrite && (
                   <button
                     type="button"
                     onClick={() => remove(c.id)}
@@ -123,6 +125,12 @@ export default function Comments({
         )}
       </div>
 
+      {/* Reading the conversation is most of the value; a guest just can't
+          join it. No disabled input — an empty box you can't type in reads as
+          a bug rather than a rule. */}
+      {!canWrite ? (
+        <p className="coord">Sign in to join the conversation</p>
+      ) : (
       <div className="flex gap-2">
         <input
           className="field flex-1"
@@ -149,6 +157,7 @@ export default function Comments({
           Post
         </button>
       </div>
+      )}
     </div>
   );
 }

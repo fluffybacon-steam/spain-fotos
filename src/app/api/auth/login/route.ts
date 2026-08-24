@@ -29,7 +29,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "That name and password don't match" }, { status: 401 });
   }
 
-  const token = await signSession({ uid: user.id, name: user.name, admin: user.isAdmin });
+  const token = await signSession({
+    uid: user.id,
+    name: user.name,
+    admin: user.isAdmin,
+    role: "member",
+  });
   const res = NextResponse.json({ ok: true, name: user.name });
   res.cookies.set(SESSION_COOKIE, token, cookieOptions);
   return res;

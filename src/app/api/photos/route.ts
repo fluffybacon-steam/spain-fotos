@@ -12,7 +12,7 @@ import {
   REACTION_KINDS,
   type ReactionKind,
 } from "@/db";
-import { requireUser, guard } from "@/lib/session";
+import { requireUser, guard, requireMember } from "@/lib/session";
 import type { PhotoDTO } from "@/types";
 
 export const runtime = "nodejs";
@@ -133,7 +133,7 @@ const CreateBody = z.object({
 
 /** Called after the client has finished PUTting all three objects to R2. */
 export const POST = guard(async (req: Request) => {
-  const me = await requireUser();
+  const me = await requireMember();
   const parsed = CreateBody.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
   console.log("post /api/photos", parsed);

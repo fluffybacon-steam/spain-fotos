@@ -4,6 +4,7 @@
 import { useState } from "react";
 import type { ReactionKind } from "@/db/schema";
 import type { PhotoDTO } from "@/types";
+import { useViewer } from "./Viewer";
 
 export const REACTIONS: { kind: ReactionKind; glyph: string; label: string }[] = [
   { kind: "heart", glyph: "❤️", label: "Love it" },
@@ -22,9 +23,10 @@ export default function ReactionBar({
   onChange: (updated: PhotoDTO) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const { canWrite } = useViewer();
 
   async function react(kind: ReactionKind) {
-    if (busy) return;
+    if (busy || !canWrite) return;
     // Tapping your current reaction clears it.
     const next = photo.myReaction === kind ? null : kind;
 
@@ -55,6 +57,19 @@ export default function ReactionBar({
       {REACTIONS.map(({ kind, glyph, label }) => {
         const count = photo.reactions[kind] ?? 0;
         const mine = photo.myReaction === kind;
+        // Guests see the tally and no controls. Rendering disabled buttons
+        // instead would grey out the counts, which are the interesting part
+        // and are perfectly readable — it's only the tapping that's gone.
+        if (!canWrite) {
+          if (count === 0) return null;
+          return (
+            <span key={kind} className="reaction" aria-label={`${label} (${count})`}>
+              <span className="glyph">{glyph}</span>
+              <span>{count}</span>
+            </span>
+          );
+        }
+
         return (
           <button
             key={kind}

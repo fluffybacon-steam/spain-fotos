@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import Lightbox from "@/components/Lightbox";
 import { REACTIONS } from "@/components/ReactionBar";
+import { useViewer } from "@/components/Viewer";
 import LocationSheet from "@/components/LocationSheet";
 import { PRESET_PLACES } from "@/lib/preset-places";
 import { isLocated, type NamedPlace } from "@/lib/places";
@@ -82,6 +83,7 @@ const NO_TALLY = { n: 0, bytes: 0 };
 
 export default function BrowsePage() {
   const router = useRouter();
+  const { canWrite } = useViewer();
   const [photos, setPhotos] = useState<PhotoDTO[]>([]);
   const [people, setPeople] = useState<PersonDTO[]>([]);
   const [namedPlaces, setNamedPlaces] = useState<NamedPlace[]>([]);
@@ -344,9 +346,19 @@ export default function BrowsePage() {
         <Link href="/" className="btn btn-quiet btn-sm">
           Map
         </Link>
-        <Link href="/upload" className="btn btn-primary btn-sm">
-          Add fotos
-        </Link>
+        {canWrite ? (
+          <Link href="/upload" className="btn btn-primary btn-sm">
+            Add fotos
+          </Link>
+        ) : (
+          <Link
+            href="/login"
+            className="btn btn-quiet btn-sm"
+            title="You're viewing without an account. Sign in to add fotos."
+          >
+            View only
+          </Link>
+        )}
       </div>
 
       {/* Who took it. Horizontally scrollable so it survives a big group. */}
@@ -401,6 +413,9 @@ export default function BrowsePage() {
           <span>{markTally.total}</span>
           <span className="memory">{formatBytes(markTally.totalBytes)}</span>
         </button> */}
+        {/* Hidden from a guest: no way to star anything, so it would sit at
+            zero for ever and filter to an empty gallery. */}
+        {canWrite && (
         <button
           type="button"
           className={mark.kind === "favorites" ? "reaction active shrink-0" : "reaction shrink-0"}
@@ -414,6 +429,7 @@ export default function BrowsePage() {
           <span>{markTally.favorites.n}</span>
           <span className="memory">{formatBytes(markTally.favorites.bytes)}</span>
         </button>
+        )}
         {REACTIONS.map(({ kind, glyph: emoji, label }) => {
           const tally = markTally.byReaction.get(kind) ?? NO_TALLY;
           const on = mark.kind === "reaction" && mark.reaction === kind;
@@ -587,14 +603,17 @@ export default function BrowsePage() {
             >
               {allShownSelected ? "Clear" : "Select all"}
             </button>
-            <button
-              type="button"
-              className="btn btn-quiet btn-sm"
-              onClick={() => setPlacing(true)}
-              disabled={selected.size === 0 || downloading}
-            >
-              Set location
-            </button>
+            {/* Downloading a selection is a read; moving its pins isn't. */}
+            {canWrite && (
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                onClick={() => setPlacing(true)}
+                disabled={selected.size === 0 || downloading}
+              >
+                Set location
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-primary btn-sm"

@@ -82,7 +82,7 @@ export default function PlacePicker({
             </button>
           </div>
 
-          <div className="grid grid-cols-5 gap-1">
+          <div className="grid grid-cols-5 gap-1 unplaced">
             {unplaced.map((photo) => {
               const on = selected.has(photo.id);
               return (

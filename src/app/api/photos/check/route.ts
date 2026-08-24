@@ -4,7 +4,7 @@ import { inArray, isNotNull, and } from "drizzle-orm";
 import { z } from "zod";
 import { db, photos, users } from "@/db";
 import { eq } from "drizzle-orm";
-import { requireUser, guard } from "@/lib/session";
+import { guard, requireMember } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ const Body = z.object({ hashes: z.array(z.string().max(80)).min(1).max(200) });
  * may genuinely both hold the same photo, but worth telling the uploader.
  */
 export const POST = guard(async (req: Request) => {
-  const me = await requireUser();
+  const me = await requireMember();
   const parsed = Body.safeParse(await req.json().catch((e) => console.log(e)));
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
   console.log("parsed from api/check", parsed);

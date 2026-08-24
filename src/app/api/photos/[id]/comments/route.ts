@@ -4,7 +4,7 @@ import { asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db, comments, users } from "@/db";
-import { requireUser, guard } from "@/lib/session";
+import { requireUser, guard, requireMember } from "@/lib/session";
 import type { CommentDTO } from "@/types";
 
 export const runtime = "nodejs";
@@ -38,7 +38,7 @@ export const GET = guard(async (_req: Request, ctx: { params: Promise<{ id: stri
 const Body = z.object({ body: z.string().trim().min(1).max(600) });
 
 export const POST = guard(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
-  const me = await requireUser();
+  const me = await requireMember();
   const { id } = await ctx.params;
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Write something first" }, { status: 400 });

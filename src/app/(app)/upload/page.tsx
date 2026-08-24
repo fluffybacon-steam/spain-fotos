@@ -1,8 +1,15 @@
 // src/app/(app)/upload/page.tsx
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { currentUser } from "@/lib/session";
 import Uploader from "@/components/Uploader";
 
-export default function UploadPage() {
+export default async function UploadPage() {
+  // Middleware already turns guests away from /upload; this is the second lock,
+  // the same way the app layout backs up the auth check.
+  const me = await currentUser();
+  if (me?.role === "guest") redirect("/");
+
   return (
     <main className="mx-auto min-h-dvh w-full max-w-2xl px-4 py-6">
       <div className="mb-7 flex items-start justify-end gap-4">

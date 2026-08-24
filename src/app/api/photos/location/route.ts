@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, photos } from "@/db";
-import { requireUser, guard } from "@/lib/session";
+import { guard, requireMember } from "@/lib/session";
 
 export const runtime = "nodejs";
 
@@ -30,7 +30,7 @@ const Body = z.object({
  * it "placed by hand" — the map never presents a group guess as a camera fix.
  */
 export const PATCH = guard(async (req: Request) => {
-  await requireUser();
+  await requireMember();
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
 

@@ -7,6 +7,7 @@ import ReactionBar from "./ReactionBar";
 import Avatar from "./Avatar";
 import { nearestNamed, type NamedPlace } from "@/lib/places";
 import Comments from "./Comments";
+import { useViewer } from "./Viewer";
 import { formatDuration } from "@/lib/client/video";
 
 type Props = {
@@ -55,6 +56,7 @@ export default function Lightbox({
   const [deleting, setDeleting] = useState(false);
   const [commentCount, setCommentCount] = useState<number | null>(null);
   const [favBusy, setFavBusy] = useState(false);
+  const { canWrite } = useViewer();
   const [editingTime, setEditingTime] = useState(false);
   const [timeDraft, setTimeDraft] = useState("");
   const [savingTime, setSavingTime] = useState(false);
@@ -81,7 +83,7 @@ export default function Lightbox({
    * because the whole point is finding the photo again later.
    */
   const toggleFavorite = useCallback(async () => {
-    if (!photo || favBusy) return;
+    if (!photo || favBusy || !canWrite) return;
     const next = !photo.isFavorite;
     onPhotoChange({ ...photo, isFavorite: next });
     setFavBusy(true);
@@ -97,7 +99,7 @@ export default function Lightbox({
     } finally {
       setFavBusy(false);
     }
-  }, [photo, favBusy, onPhotoChange]);
+  }, [photo, favBusy, canWrite, onPhotoChange]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -111,7 +113,7 @@ export default function Lightbox({
       else if (e.key === "ArrowLeft") go(-1);
       else if (e.key === "i") setShowMeta((v) => !v);
       else if (e.key === "s") toggleSelect();
-      else if (e.key === "f") void toggleFavorite();
+      else if (e.key === "f") void toggleFavorite(); // no-ops for a guest
     }
     window.addEventListener("keydown", onKey);
     // Stop the page behind from scrolling while the lightbox owns the screen.
@@ -160,7 +162,8 @@ export default function Lightbox({
   // trip, not to the uploader, so anyone may correct one — placed or not, theirs
   // or not. Gated only on the caller wiring up a map to drop it on, which Browse
   // doesn't.
-  const canRepin = Boolean(onRepin);
+  // A guest has no write to make, so the pin isn't theirs to correct either.
+  const canRepin = Boolean(onRepin) && canWrite;
 
   /**
    * Writes a corrected capture time. Open to everyone for the same reason the
@@ -231,6 +234,7 @@ export default function Lightbox({
           </p>
         </div>
 
+        {canWrite && (
         <button
           type="button"
           className="icon-btn"
@@ -255,6 +259,7 @@ export default function Lightbox({
             />
           </svg>
         </button>
+        )}
 
         {onToggleSelect && (
           <button
@@ -324,7 +329,7 @@ export default function Lightbox({
           </button>
         )}
 
-        {mine && (
+        {mine && canWrite && (
           <button
             type="button"
             className="icon-btn"
@@ -519,23 +524,37 @@ export default function Lightbox({
                 ) : (
                   <p className="coord truncate">
                     {/* The date is the control. People notice a wrong timestamp
-                        while reading it, so that's where the way to fix it goes. */}
-                    <button
-                      type="button"
-                      className="underline underline-offset-2 hover:text-foam"
-                      onClick={startEditingTime}
-                      title="Correct the date and time"
-                    >
-                      {taken
-                        ? taken.toLocaleString(undefined, {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "Date unknown"}
-                    </button>
+                        while reading it, so that's where the way to fix it goes
+                        — for anyone who can write. For a guest it's just the
+                        date, with no underline promising an edit. */}
+                    {canWrite ? (
+                      <button
+                        type="button"
+                        className="underline underline-offset-2 hover:text-foam"
+                        onClick={startEditingTime}
+                        title="Correct the date and time"
+                      >
+                        {taken
+                          ? taken.toLocaleString(undefined, {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "Date unknown"}
+                      </button>
+                    ) : taken ? (
+                      taken.toLocaleString(undefined, {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    ) : (
+                      "Date unknown"
+                    )}
                     {placed && (
                       <>
                         {"  ·  "}

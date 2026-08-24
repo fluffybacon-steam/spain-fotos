@@ -1,0 +1,1043 @@
+From c7c965560e79514e887dc06dfcca2e6eb914365c Mon Sep 17 00:00:00 2001
+From: Patch <patch@local>
+Date: Mon, 24 Aug 2026 00:31:07 +0000
+Subject: [PATCH] Add view-only mode, reachable from the login screen
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A button on the login screen starts a session that can read everything
+and write nothing: the map, the gallery, the photos, the comment
+threads and the reaction tallies, with no upload, no comment, no
+reaction, no star, no pin and no delete.
+
+What makes it view-only is the server, not the interface. Every route
+that writes now calls requireMember instead of requireUser, and
+requireMember rejects a guest with a 403 through the existing guard.
+Hiding buttons only stops the app from offering a write, not from
+accepting one -- a guest holds a valid session cookie and can send any
+request by hand. All eleven write routes were checked against a live
+server with a guest cookie; all eleven refuse.
+
+  photos POST · photos/check POST · photos/location PATCH
+  photos/[id] PATCH + DELETE · reaction PUT · favorite PUT
+  comments POST · comments/[id] DELETE · places POST
+  uploads/presign POST
+
+403 rather than 401, because the session is fine -- it just isn't
+allowed to do this. A 401 would bounce a perfectly valid guest to the
+login screen.
+
+Guests share one identity, uid "guest". It is never written to any
+table, and in the two reads scoped to "mine" it simply matches nothing:
+no favorites, no myReaction. Five characters can't collide with a
+nanoid, so it can't borrow a member's rows either. A token with no role
+claim is read as a member, since sessions last 60 days and every
+existing one belongs to a member; and a guest token is never admin,
+whatever the claim says.
+
+The UI half is a ViewerProvider in the app layout, reading the role off
+the cookie the server just verified rather than fetching it, so nothing
+flashes a write button before hiding it. It defaults to canWrite: false
+-- a missing provider then hides buttons from a member, which is
+visible immediately, instead of showing buttons to a guest, which
+isn't. Reaction bars become plain tallies, comment threads keep the
+conversation and lose the composer, and the star, re-pin, delete,
+date-edit, upload, bulk-place and merge affordances go. /upload
+redirects guests in the middleware and again in the page.
+
+/login no longer bounces a signed-in guest home: signing in properly is
+how a view-only session gets upgraded, and bouncing them would make the
+form unreachable without first finding a sign-out button. The "View
+only" badge in the top bar links there.
+
+Worth being explicit about the tradeoff, since it's the whole point of
+the feature: this makes the trip's photos, and their locations,
+readable by anyone who has the address. No password, no invitation, no
+audit trail. If that's more than intended, gate the route on an env var
+-- one condition in /api/auth/guest and one in LoginForm -- so the door
+can be closed without a redeploy of anything else.
+---
+ src/app/(app)/browse/page.tsx             | 41 +++++++++++----
+ src/app/(app)/layout.tsx                  | 11 +++-
+ src/app/(app)/upload/page.tsx             |  9 +++-
+ src/app/api/auth/guest/route.ts           | 24 +++++++++
+ src/app/api/auth/login/route.ts           |  7 ++-
+ src/app/api/comments/[id]/route.ts        |  4 +-
+ src/app/api/photos/[id]/comments/route.ts |  4 +-
+ src/app/api/photos/[id]/favorite/route.ts |  4 +-
+ src/app/api/photos/[id]/reaction/route.ts |  4 +-
+ src/app/api/photos/[id]/route.ts          |  6 +--
+ src/app/api/photos/check/route.ts         |  4 +-
+ src/app/api/photos/location/route.ts      |  4 +-
+ src/app/api/photos/route.ts               |  4 +-
+ src/app/api/places/route.ts               |  4 +-
+ src/app/api/uploads/presign/route.ts      |  4 +-
+ src/app/login/LoginForm.tsx               | 33 ++++++++++++
+ src/app/login/page.tsx                    |  6 ++-
+ src/components/Comments.tsx               | 11 +++-
+ src/components/Lightbox.tsx               | 63 +++++++++++++++--------
+ src/components/ReactionBar.tsx            | 17 +++++-
+ src/components/TopBar.tsx                 | 24 +++++++--
+ src/components/Viewer.tsx                 | 33 ++++++++++++
+ src/lib/session.ts                        | 57 +++++++++++++++++++-
+ src/proxy.ts                              | 29 ++++++++++-
+ 24 files changed, 338 insertions(+), 69 deletions(-)
+ create mode 100644 src/app/api/auth/guest/route.ts
+ create mode 100644 src/components/Viewer.tsx
+
+diff --git a/src/app/(app)/browse/page.tsx b/src/app/(app)/browse/page.tsx
+index a73df87..0d3115d 100644
+--- a/src/app/(app)/browse/page.tsx
++++ b/src/app/(app)/browse/page.tsx
+@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
+ import Avatar from "@/components/Avatar";
+ import Lightbox from "@/components/Lightbox";
+ import { REACTIONS } from "@/components/ReactionBar";
++import { useViewer } from "@/components/Viewer";
+ import LocationSheet from "@/components/LocationSheet";
+ import { PRESET_PLACES } from "@/lib/preset-places";
+ import { isLocated, type NamedPlace } from "@/lib/places";
+@@ -82,6 +83,7 @@ const NO_TALLY = { n: 0, bytes: 0 };
+ 
+ export default function BrowsePage() {
+   const router = useRouter();
++  const { canWrite } = useViewer();
+   const [photos, setPhotos] = useState<PhotoDTO[]>([]);
+   const [people, setPeople] = useState<PersonDTO[]>([]);
+   const [namedPlaces, setNamedPlaces] = useState<NamedPlace[]>([]);
+@@ -344,9 +346,19 @@ export default function BrowsePage() {
+         <Link href="/" className="btn btn-quiet btn-sm">
+           Map
+         </Link>
+-        <Link href="/upload" className="btn btn-primary btn-sm">
+-          Add fotos
+-        </Link>
++        {canWrite ? (
++          <Link href="/upload" className="btn btn-primary btn-sm">
++            Add fotos
++          </Link>
++        ) : (
++          <Link
++            href="/login"
++            className="btn btn-quiet btn-sm"
++            title="You're viewing without an account. Sign in to add fotos."
++          >
++            View only
++          </Link>
++        )}
+       </div>
+ 
+       {/* Who took it. Horizontally scrollable so it survives a big group. */}
+@@ -401,6 +413,9 @@ export default function BrowsePage() {
+           <span>{markTally.total}</span>
+           <span className="memory">{formatBytes(markTally.totalBytes)}</span>
+         </button> */}
++        {/* Hidden from a guest: no way to star anything, so it would sit at
++            zero for ever and filter to an empty gallery. */}
++        {canWrite && (
+         <button
+           type="button"
+           className={mark.kind === "favorites" ? "reaction active shrink-0" : "reaction shrink-0"}
+@@ -414,6 +429,7 @@ export default function BrowsePage() {
+           <span>{markTally.favorites.n}</span>
+           <span className="memory">{formatBytes(markTally.favorites.bytes)}</span>
+         </button>
++        )}
+         {REACTIONS.map(({ kind, glyph: emoji, label }) => {
+           const tally = markTally.byReaction.get(kind) ?? NO_TALLY;
+           const on = mark.kind === "reaction" && mark.reaction === kind;
+@@ -587,14 +603,17 @@ export default function BrowsePage() {
+             >
+               {allShownSelected ? "Clear" : "Select all"}
+             </button>
+-            <button
+-              type="button"
+-              className="btn btn-quiet btn-sm"
+-              onClick={() => setPlacing(true)}
+-              disabled={selected.size === 0 || downloading}
+-            >
+-              Set location
+-            </button>
++            {/* Downloading a selection is a read; moving its pins isn't. */}
++            {canWrite && (
++              <button
++                type="button"
++                className="btn btn-quiet btn-sm"
++                onClick={() => setPlacing(true)}
++                disabled={selected.size === 0 || downloading}
++              >
++                Set location
++              </button>
++            )}
+             <button
+               type="button"
+               className="btn btn-primary btn-sm"
+diff --git a/src/app/(app)/layout.tsx b/src/app/(app)/layout.tsx
+index 8953005..24ab40e 100644
+--- a/src/app/(app)/layout.tsx
++++ b/src/app/(app)/layout.tsx
+@@ -1,11 +1,20 @@
+ // src/app/(app)/layout.tsx
+ import { redirect } from "next/navigation";
+ import { currentUser } from "@/lib/session";
++import { ViewerProvider } from "@/components/Viewer";
+ 
+ // Middleware already blocks unauthenticated requests; this is the second lock
+ // so a middleware matcher mistake can never expose the gallery.
+ export default async function AppLayout({ children }: { children: React.ReactNode }) {
+   const user = await currentUser();
+   if (!user) redirect("/login");
+-  return <>{children}</>;
++
++  // Read once here rather than fetched per page: the role is already in the
++  // cookie the server just verified, and a client that had to ask for it would
++  // render every write button for a moment before hiding them again.
++  return (
++    <ViewerProvider value={{ uid: user.uid, name: user.name, canWrite: user.role !== "guest" }}>
++      {children}
++    </ViewerProvider>
++  );
+ }
+diff --git a/src/app/(app)/upload/page.tsx b/src/app/(app)/upload/page.tsx
+index e227640..311b2f1 100644
+--- a/src/app/(app)/upload/page.tsx
++++ b/src/app/(app)/upload/page.tsx
+@@ -1,8 +1,15 @@
+ // src/app/(app)/upload/page.tsx
+ import Link from "next/link";
++import { redirect } from "next/navigation";
++import { currentUser } from "@/lib/session";
+ import Uploader from "@/components/Uploader";
+ 
+-export default function UploadPage() {
++export default async function UploadPage() {
++  // Middleware already turns guests away from /upload; this is the second lock,
++  // the same way the app layout backs up the auth check.
++  const me = await currentUser();
++  if (me?.role === "guest") redirect("/");
++
+   return (
+     <main className="mx-auto min-h-dvh w-full max-w-2xl px-4 py-6">
+       <div className="mb-7 flex items-start justify-end gap-4">
+diff --git a/src/app/api/auth/guest/route.ts b/src/app/api/auth/guest/route.ts
+new file mode 100644
+index 0000000..4573064
+--- /dev/null
++++ b/src/app/api/auth/guest/route.ts
+@@ -0,0 +1,24 @@
++// src/app/api/auth/guest/route.ts
++import { NextResponse } from "next/server";
++import { signSession, SESSION_COOKIE, cookieOptions, GUEST_SESSION } from "@/lib/session";
++
++export const runtime = "nodejs";
++
++/**
++ * Starts a view-only session.
++ *
++ * There are no credentials to check — the button on the login screen is the
++ * entire gate, so in practice the trip's photos are readable by anyone who has
++ * the address. That's the deal being struck deliberately: a link you can send
++ * to a parent without minting them an account.
++ *
++ * The cookie it sets is an ordinary session, so middleware lets it through and
++ * every read route treats it like any other caller. What makes it view-only is
++ * requireMember on the writing routes, not anything here.
++ */
++export async function POST() {
++  const token = await signSession(GUEST_SESSION);
++  const res = NextResponse.json({ ok: true, role: GUEST_SESSION.role });
++  res.cookies.set(SESSION_COOKIE, token, cookieOptions);
++  return res;
++}
+diff --git a/src/app/api/auth/login/route.ts b/src/app/api/auth/login/route.ts
+index d80146c..d653c58 100644
+--- a/src/app/api/auth/login/route.ts
++++ b/src/app/api/auth/login/route.ts
+@@ -29,7 +29,12 @@ export async function POST(req: Request) {
+     return NextResponse.json({ error: "That name and password don't match" }, { status: 401 });
+   }
+ 
+-  const token = await signSession({ uid: user.id, name: user.name, admin: user.isAdmin });
++  const token = await signSession({
++    uid: user.id,
++    name: user.name,
++    admin: user.isAdmin,
++    role: "member",
++  });
+   const res = NextResponse.json({ ok: true, name: user.name });
+   res.cookies.set(SESSION_COOKIE, token, cookieOptions);
+   return res;
+diff --git a/src/app/api/comments/[id]/route.ts b/src/app/api/comments/[id]/route.ts
+index 7cf6b92..4793f63 100644
+--- a/src/app/api/comments/[id]/route.ts
++++ b/src/app/api/comments/[id]/route.ts
+@@ -2,12 +2,12 @@
+ import { NextResponse } from "next/server";
+ import { eq } from "drizzle-orm";
+ import { db, comments } from "@/db";
+-import { requireUser, guard } from "@/lib/session";
++import { guard, requireMember } from "@/lib/session";
+ 
+ export const runtime = "nodejs";
+ 
+ export const DELETE = guard(async (_req: Request, ctx: { params: Promise<{ id: string }> }) => {
+-  const me = await requireUser();
++  const me = await requireMember();
+   const { id } = await ctx.params;
+ 
+   const [row] = await db.select().from(comments).where(eq(comments.id, id)).limit(1);
+diff --git a/src/app/api/photos/[id]/comments/route.ts b/src/app/api/photos/[id]/comments/route.ts
+index 69e68a4..a70547b 100644
+--- a/src/app/api/photos/[id]/comments/route.ts
++++ b/src/app/api/photos/[id]/comments/route.ts
+@@ -4,7 +4,7 @@ import { asc, eq } from "drizzle-orm";
+ import { nanoid } from "nanoid";
+ import { z } from "zod";
+ import { db, comments, users } from "@/db";
+-import { requireUser, guard } from "@/lib/session";
++import { requireUser, guard, requireMember } from "@/lib/session";
+ import type { CommentDTO } from "@/types";
+ 
+ export const runtime = "nodejs";
+@@ -38,7 +38,7 @@ export const GET = guard(async (_req: Request, ctx: { params: Promise<{ id: stri
+ const Body = z.object({ body: z.string().trim().min(1).max(600) });
+ 
+ export const POST = guard(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
+-  const me = await requireUser();
++  const me = await requireMember();
+   const { id } = await ctx.params;
+   const parsed = Body.safeParse(await req.json().catch(() => null));
+   if (!parsed.success) return NextResponse.json({ error: "Write something first" }, { status: 400 });
+diff --git a/src/app/api/photos/[id]/favorite/route.ts b/src/app/api/photos/[id]/favorite/route.ts
+index 7ccfc04..a55e77b 100644
+--- a/src/app/api/photos/[id]/favorite/route.ts
++++ b/src/app/api/photos/[id]/favorite/route.ts
+@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
+ import { and, eq } from "drizzle-orm";
+ import { z } from "zod";
+ import { db, favorites, photos } from "@/db";
+-import { requireUser, guard } from "@/lib/session";
++import { guard, requireMember } from "@/lib/session";
+ 
+ export const runtime = "nodejs";
+ 
+@@ -21,7 +21,7 @@ const Body = z.object({ favorite: z.boolean() });
+  * caller's own rows.
+  */
+ export const PUT = guard(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
+-  const me = await requireUser();
++  const me = await requireMember();
+   const { id } = await ctx.params;
+   const parsed = Body.safeParse(await req.json().catch(() => null));
+   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+diff --git a/src/app/api/photos/[id]/reaction/route.ts b/src/app/api/photos/[id]/reaction/route.ts
+index dcffeb8..c88e72f 100644
+--- a/src/app/api/photos/[id]/reaction/route.ts
++++ b/src/app/api/photos/[id]/reaction/route.ts
+@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
+ import { and, eq } from "drizzle-orm";
+ import { z } from "zod";
+ import { db, reactions, REACTION_KINDS } from "@/db";
+-import { requireUser, guard } from "@/lib/session";
++import { guard, requireMember } from "@/lib/session";
+ 
+ export const runtime = "nodejs";
+ 
+@@ -11,7 +11,7 @@ const Body = z.object({ kind: z.enum(REACTION_KINDS).nullable() });
+ 
+ /** One reaction per person per photo. Sending null clears it. */
+ export const PUT = guard(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
+-  const me = await requireUser();
++  const me = await requireMember();
+   const { id } = await ctx.params;
+   const parsed = Body.safeParse(await req.json().catch(() => null));
+   if (!parsed.success) return NextResponse.json({ error: "Unknown reaction" }, { status: 400 });
+diff --git a/src/app/api/photos/[id]/route.ts b/src/app/api/photos/[id]/route.ts
+index 6c3a55a..c187d40 100644
+--- a/src/app/api/photos/[id]/route.ts
++++ b/src/app/api/photos/[id]/route.ts
+@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
+ import { eq } from "drizzle-orm";
+ import { z } from "zod";
+ import { db, photos } from "@/db";
+-import { requireUser, guard } from "@/lib/session";
++import { guard, requireMember } from "@/lib/session";
+ import { deleteObjects } from "@/lib/r2";
+ 
+ export const runtime = "nodejs";
+@@ -38,7 +38,7 @@ const Patch = z.object({
+  * photo is gone.
+  */
+ export const PATCH = guard(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
+-  const me = await requireUser();
++  const me = await requireMember();
+   const { id } = await ctx.params;
+   const parsed = Patch.safeParse(await req.json().catch(() => null));
+   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+@@ -82,7 +82,7 @@ export const PATCH = guard(async (req: Request, ctx: { params: Promise<{ id: str
+  * group's to correct, the photo itself is not the group's to remove.
+  */
+ export const DELETE = guard(async (_req: Request, ctx: { params: Promise<{ id: string }> }) => {
+-  const me = await requireUser();
++  const me = await requireMember();
+   const { id } = await ctx.params;
+ 
+   const [row] = await db.select().from(photos).where(eq(photos.id, id)).limit(1);
+diff --git a/src/app/api/photos/check/route.ts b/src/app/api/photos/check/route.ts
+index 7746b53..fbeff57 100644
+--- a/src/app/api/photos/check/route.ts
++++ b/src/app/api/photos/check/route.ts
+@@ -4,7 +4,7 @@ import { inArray, isNotNull, and } from "drizzle-orm";
+ import { z } from "zod";
+ import { db, photos, users } from "@/db";
+ import { eq } from "drizzle-orm";
+-import { requireUser, guard } from "@/lib/session";
++import { guard, requireMember } from "@/lib/session";
+ 
+ export const runtime = "nodejs";
+ export const dynamic = "force-dynamic";
+@@ -20,7 +20,7 @@ const Body = z.object({ hashes: z.array(z.string().max(80)).min(1).max(200) });
+  * may genuinely both hold the same photo, but worth telling the uploader.
+  */
+ export const POST = guard(async (req: Request) => {
+-  const me = await requireUser();
++  const me = await requireMember();
+   const parsed = Body.safeParse(await req.json().catch((e) => console.log(e)));
+   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+   console.log("parsed from api/check", parsed);
+diff --git a/src/app/api/photos/location/route.ts b/src/app/api/photos/location/route.ts
+index ddff5db..f756e8a 100644
+--- a/src/app/api/photos/location/route.ts
++++ b/src/app/api/photos/location/route.ts
+@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
+ import { inArray } from "drizzle-orm";
+ import { z } from "zod";
+ import { db, photos } from "@/db";
+-import { requireUser, guard } from "@/lib/session";
++import { guard, requireMember } from "@/lib/session";
+ 
+ export const runtime = "nodejs";
+ 
+@@ -30,7 +30,7 @@ const Body = z.object({
+  * it "placed by hand" — the map never presents a group guess as a camera fix.
+  */
+ export const PATCH = guard(async (req: Request) => {
+-  await requireUser();
++  await requireMember();
+   const parsed = Body.safeParse(await req.json().catch(() => null));
+   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+ 
+diff --git a/src/app/api/photos/route.ts b/src/app/api/photos/route.ts
+index 32249a0..514794c 100644
+--- a/src/app/api/photos/route.ts
++++ b/src/app/api/photos/route.ts
+@@ -12,7 +12,7 @@ import {
+   REACTION_KINDS,
+   type ReactionKind,
+ } from "@/db";
+-import { requireUser, guard } from "@/lib/session";
++import { requireUser, guard, requireMember } from "@/lib/session";
+ import type { PhotoDTO } from "@/types";
+ 
+ export const runtime = "nodejs";
+@@ -133,7 +133,7 @@ const CreateBody = z.object({
+ 
+ /** Called after the client has finished PUTting all three objects to R2. */
+ export const POST = guard(async (req: Request) => {
+-  const me = await requireUser();
++  const me = await requireMember();
+   const parsed = CreateBody.safeParse(await req.json().catch(() => null));
+   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+   console.log("post /api/photos", parsed);
+diff --git a/src/app/api/places/route.ts b/src/app/api/places/route.ts
+index 6639dd6..c9a0bee 100644
+--- a/src/app/api/places/route.ts
++++ b/src/app/api/places/route.ts
+@@ -4,7 +4,7 @@ import { asc } from "drizzle-orm";
+ import { nanoid } from "nanoid";
+ import { z } from "zod";
+ import { db, places } from "@/db";
+-import { requireUser, guard } from "@/lib/session";
++import { requireUser, guard, requireMember } from "@/lib/session";
+ 
+ export const runtime = "nodejs";
+ export const dynamic = "force-dynamic";
+@@ -24,7 +24,7 @@ const Body = z.object({
+ });
+ 
+ export const POST = guard(async (req: Request) => {
+-  const me = await requireUser();
++  const me = await requireMember();
+   const parsed = Body.safeParse(await req.json().catch(() => null));
+   if (!parsed.success) return NextResponse.json({ error: "Give the place a name" }, { status: 400 });
+ 
+diff --git a/src/app/api/uploads/presign/route.ts b/src/app/api/uploads/presign/route.ts
+index a0a5f25..b1d386d 100644
+--- a/src/app/api/uploads/presign/route.ts
++++ b/src/app/api/uploads/presign/route.ts
+@@ -2,7 +2,7 @@
+ import { NextResponse } from "next/server";
+ import { nanoid } from "nanoid";
+ import { z } from "zod";
+-import { requireUser, guard } from "@/lib/session";
++import { guard, requireMember } from "@/lib/session";
+ import { presignUpload, photoKeys } from "@/lib/r2";
+ 
+ export const runtime = "nodejs";
+@@ -25,7 +25,7 @@ const Body = z.object({
+  * exists — an abandoned upload just leaves orphaned objects, never a half row.
+  */
+ export const POST = guard(async (req: Request) => {
+-  const user = await requireUser();
++  const user = await requireMember();
+   const parsed = Body.safeParse(await req.json().catch(() => null));
+   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+ 
+diff --git a/src/app/login/LoginForm.tsx b/src/app/login/LoginForm.tsx
+index 3c0e179..c9e16b4 100644
+--- a/src/app/login/LoginForm.tsx
++++ b/src/app/login/LoginForm.tsx
+@@ -36,6 +36,30 @@ export default function LoginForm() {
+     }
+   }
+ 
++  /**
++   * Starts a view-only session. No credentials, by design — this is the "have a
++   * look" door for someone who was on the trip's group chat but doesn't want an
++   * account. What they get is genuinely read-only: the server refuses every
++   * write from a guest session, not just the buttons.
++   */
++  async function viewOnly() {
++    setBusy(true);
++    setError(null);
++    try {
++      const res = await fetch("/api/auth/guest", { method: "POST" });
++      if (!res.ok) {
++        setError("Couldn't start a view-only session");
++        return;
++      }
++      router.replace(params.get("next") || "/");
++      router.refresh();
++    } catch {
++      setError("Couldn't reach the server. Check your connection.");
++    } finally {
++      setBusy(false);
++    }
++  }
++
+   function setPassVisible(){
+     const passField = document.querySelector('input[type="password"]') as HTMLInputElement;
+     if (passField) {
+@@ -83,6 +107,15 @@ export default function LoginForm() {
+       <button type="submit" className="btn btn-primary mt-2" disabled={busy}>
+         {busy ? "Checking…" : "Sign in"}
+       </button>
++
++      {/* type="button" matters inside a form — a stray submit here would post
++          empty credentials and show "that name and password don't match". */}
++      <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void viewOnly()}>
++        Look around without an account
++      </button>
++      <p className="coord text-center">
++        View only: no uploading, commenting or reacting
++      </p>
+       </form>
+   );
+ }
+diff --git a/src/app/login/page.tsx b/src/app/login/page.tsx
+index 59f90b4..b63b82a 100644
+--- a/src/app/login/page.tsx
++++ b/src/app/login/page.tsx
+@@ -5,7 +5,11 @@ import LoginForm from "./LoginForm";
+ import EmojiSky from "@/components/EmojiSky";
+ 
+ export default async function LoginPage() {
+-  if (await currentUser()) redirect("/");
++  // Guests are deliberately let through to the form: signing in properly is
++  // how a view-only session is upgraded, and bouncing them home would make the
++  // login screen unreachable without first finding a sign-out button.
++  const me = await currentUser();
++  if (me && me.role !== "guest") redirect("/");
+ 
+   return (
+     <main className="relative grid min-h-dvh place-items-center overflow-hidden px-5 py-10">
+diff --git a/src/components/Comments.tsx b/src/components/Comments.tsx
+index 84d2ba3..fd9e4f1 100644
+--- a/src/components/Comments.tsx
++++ b/src/components/Comments.tsx
+@@ -3,6 +3,7 @@
+ 
+ import { useEffect, useRef, useState } from "react";
+ import Avatar from "./Avatar";
++import { useViewer } from "./Viewer";
+ import type { CommentDTO } from "@/types";
+ 
+ /** Loads lazily — only when the thread is actually opened for a photo. */
+@@ -18,6 +19,7 @@ export default function Comments({
+   const [loading, setLoading] = useState(true);
+   const [sending, setSending] = useState(false);
+   const endRef = useRef<HTMLDivElement>(null);
++  const { canWrite } = useViewer();
+ 
+   useEffect(() => {
+     let cancelled = false;
+@@ -106,7 +108,7 @@ export default function Comments({
+                     })}
+                   </p>
+                 </div>
+-                {c.mine && (
++                {c.mine && canWrite && (
+                   <button
+                     type="button"
+                     onClick={() => remove(c.id)}
+@@ -123,6 +125,12 @@ export default function Comments({
+         )}
+       </div>
+ 
++      {/* Reading the conversation is most of the value; a guest just can't
++          join it. No disabled input — an empty box you can't type in reads as
++          a bug rather than a rule. */}
++      {!canWrite ? (
++        <p className="coord">Sign in to join the conversation</p>
++      ) : (
+       <div className="flex gap-2">
+         <input
+           className="field flex-1"
+@@ -149,6 +157,7 @@ export default function Comments({
+           Post
+         </button>
+       </div>
++      )}
+     </div>
+   );
+ }
+diff --git a/src/components/Lightbox.tsx b/src/components/Lightbox.tsx
+index 06a8328..1633c64 100644
+--- a/src/components/Lightbox.tsx
++++ b/src/components/Lightbox.tsx
+@@ -7,6 +7,7 @@ import ReactionBar from "./ReactionBar";
+ import Avatar from "./Avatar";
+ import { nearestNamed, type NamedPlace } from "@/lib/places";
+ import Comments from "./Comments";
++import { useViewer } from "./Viewer";
+ import { formatDuration } from "@/lib/client/video";
+ 
+ type Props = {
+@@ -55,6 +56,7 @@ export default function Lightbox({
+   const [deleting, setDeleting] = useState(false);
+   const [commentCount, setCommentCount] = useState<number | null>(null);
+   const [favBusy, setFavBusy] = useState(false);
++  const { canWrite } = useViewer();
+   const [editingTime, setEditingTime] = useState(false);
+   const [timeDraft, setTimeDraft] = useState("");
+   const [savingTime, setSavingTime] = useState(false);
+@@ -81,7 +83,7 @@ export default function Lightbox({
+    * because the whole point is finding the photo again later.
+    */
+   const toggleFavorite = useCallback(async () => {
+-    if (!photo || favBusy) return;
++    if (!photo || favBusy || !canWrite) return;
+     const next = !photo.isFavorite;
+     onPhotoChange({ ...photo, isFavorite: next });
+     setFavBusy(true);
+@@ -97,7 +99,7 @@ export default function Lightbox({
+     } finally {
+       setFavBusy(false);
+     }
+-  }, [photo, favBusy, onPhotoChange]);
++  }, [photo, favBusy, canWrite, onPhotoChange]);
+ 
+   useEffect(() => {
+     function onKey(e: KeyboardEvent) {
+@@ -111,7 +113,7 @@ export default function Lightbox({
+       else if (e.key === "ArrowLeft") go(-1);
+       else if (e.key === "i") setShowMeta((v) => !v);
+       else if (e.key === "s") toggleSelect();
+-      else if (e.key === "f") void toggleFavorite();
++      else if (e.key === "f") void toggleFavorite(); // no-ops for a guest
+     }
+     window.addEventListener("keydown", onKey);
+     // Stop the page behind from scrolling while the lightbox owns the screen.
+@@ -160,7 +162,8 @@ export default function Lightbox({
+   // trip, not to the uploader, so anyone may correct one — placed or not, theirs
+   // or not. Gated only on the caller wiring up a map to drop it on, which Browse
+   // doesn't.
+-  const canRepin = Boolean(onRepin);
++  // A guest has no write to make, so the pin isn't theirs to correct either.
++  const canRepin = Boolean(onRepin) && canWrite;
+ 
+   /**
+    * Writes a corrected capture time. Open to everyone for the same reason the
+@@ -231,6 +234,7 @@ export default function Lightbox({
+           </p>
+         </div>
+ 
++        {canWrite && (
+         <button
+           type="button"
+           className="icon-btn"
+@@ -255,6 +259,7 @@ export default function Lightbox({
+             />
+           </svg>
+         </button>
++        )}
+ 
+         {onToggleSelect && (
+           <button
+@@ -324,7 +329,7 @@ export default function Lightbox({
+           </button>
+         )}
+ 
+-        {mine && (
++        {mine && canWrite && (
+           <button
+             type="button"
+             className="icon-btn"
+@@ -519,23 +524,37 @@ export default function Lightbox({
+                 ) : (
+                   <p className="coord truncate">
+                     {/* The date is the control. People notice a wrong timestamp
+-                        while reading it, so that's where the way to fix it goes. */}
+-                    <button
+-                      type="button"
+-                      className="underline underline-offset-2 hover:text-foam"
+-                      onClick={startEditingTime}
+-                      title="Correct the date and time"
+-                    >
+-                      {taken
+-                        ? taken.toLocaleString(undefined, {
+-                            day: "numeric",
+-                            month: "short",
+-                            year: "numeric",
+-                            hour: "2-digit",
+-                            minute: "2-digit",
+-                          })
+-                        : "Date unknown"}
+-                    </button>
++                        while reading it, so that's where the way to fix it goes
++                        — for anyone who can write. For a guest it's just the
++                        date, with no underline promising an edit. */}
++                    {canWrite ? (
++                      <button
++                        type="button"
++                        className="underline underline-offset-2 hover:text-foam"
++                        onClick={startEditingTime}
++                        title="Correct the date and time"
++                      >
++                        {taken
++                          ? taken.toLocaleString(undefined, {
++                              day: "numeric",
++                              month: "short",
++                              year: "numeric",
++                              hour: "2-digit",
++                              minute: "2-digit",
++                            })
++                          : "Date unknown"}
++                      </button>
++                    ) : taken ? (
++                      taken.toLocaleString(undefined, {
++                        day: "numeric",
++                        month: "short",
++                        year: "numeric",
++                        hour: "2-digit",
++                        minute: "2-digit",
++                      })
++                    ) : (
++                      "Date unknown"
++                    )}
+                     {placed && (
+                       <>
+                         {"  ·  "}
+diff --git a/src/components/ReactionBar.tsx b/src/components/ReactionBar.tsx
+index c5f913e..ab5e7a3 100644
+--- a/src/components/ReactionBar.tsx
++++ b/src/components/ReactionBar.tsx
+@@ -4,6 +4,7 @@
+ import { useState } from "react";
+ import type { ReactionKind } from "@/db/schema";
+ import type { PhotoDTO } from "@/types";
++import { useViewer } from "./Viewer";
+ 
+ export const REACTIONS: { kind: ReactionKind; glyph: string; label: string }[] = [
+   { kind: "heart", glyph: "❤️", label: "Love it" },
+@@ -22,9 +23,10 @@ export default function ReactionBar({
+   onChange: (updated: PhotoDTO) => void;
+ }) {
+   const [busy, setBusy] = useState(false);
++  const { canWrite } = useViewer();
+ 
+   async function react(kind: ReactionKind) {
+-    if (busy) return;
++    if (busy || !canWrite) return;
+     // Tapping your current reaction clears it.
+     const next = photo.myReaction === kind ? null : kind;
+ 
+@@ -55,6 +57,19 @@ export default function ReactionBar({
+       {REACTIONS.map(({ kind, glyph, label }) => {
+         const count = photo.reactions[kind] ?? 0;
+         const mine = photo.myReaction === kind;
++        // Guests see the tally and no controls. Rendering disabled buttons
++        // instead would grey out the counts, which are the interesting part
++        // and are perfectly readable — it's only the tapping that's gone.
++        if (!canWrite) {
++          if (count === 0) return null;
++          return (
++            <span key={kind} className="reaction" aria-label={`${label} (${count})`}>
++              <span className="glyph">{glyph}</span>
++              <span>{count}</span>
++            </span>
++          );
++        }
++
+         return (
+           <button
+             key={kind}
+diff --git a/src/components/TopBar.tsx b/src/components/TopBar.tsx
+index 6b008a9..731438c 100644
+--- a/src/components/TopBar.tsx
++++ b/src/components/TopBar.tsx
+@@ -5,6 +5,7 @@ import Link from "next/link";
+ import { useRouter } from "next/navigation";
+ import type { PersonDTO } from "@/types";
+ import Avatar from "./Avatar";
++import { useViewer } from "./Viewer";
+ 
+ /**
+  * The coordinate readout tracks the map centre like an instrument panel. It is
+@@ -30,6 +31,7 @@ export default function TopBar({
+   onToggleMerge?: () => void;
+ }) {
+   const router = useRouter();
++  const { canWrite } = useViewer();
+ 
+   async function signOut() {
+     await fetch("/api/auth/logout", { method: "POST" });
+@@ -55,7 +57,7 @@ export default function TopBar({
+         ))}
+       </Link>
+       
+-      {canMerge && onToggleMerge && (
++      {canWrite && canMerge && onToggleMerge && (
+         <button
+           type="button"
+           onClick={onToggleMerge}
+@@ -87,7 +89,7 @@ export default function TopBar({
+         </button>
+       )}
+ 
+-      {unplacedCount > 0 && (
++      {canWrite && unplacedCount > 0 && (
+         <button
+           type="button"
+           onClick={onShowUnplaced}
+@@ -104,9 +106,21 @@ export default function TopBar({
+         <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M360-400h400L622-580l-92 120-62-80-108 140Zm-40 160q-33 0-56.5-23.5T240-320v-480q0-33 23.5-56.5T320-880h480q33 0 56.5 23.5T880-800v480q0 33-23.5 56.5T800-240H320Zm0-80h480v-480H320v480ZM160-80q-33 0-56.5-23.5T80-160v-560h80v560h560v80H160Zm160-720v480-480Z"/></svg>
+       </Link>
+ 
+-      <Link href="/upload" className="btn btn-primary btn-sm">
+-        Add fotos
+-      </Link>
++      {canWrite ? (
++        <Link href="/upload" className="btn btn-primary btn-sm">
++          Add fotos
++        </Link>
++      ) : (
++        /* Says what mode you're in and doubles as the way out of it — /login
++           lets a guest through to the form precisely so this can go there. */
++        <Link
++          href="/login"
++          className="btn btn-quiet btn-sm"
++          title="You're viewing without an account. Sign in to add fotos."
++        >
++          View only
++        </Link>
++      )}
+ 
+       {/* <button type="button" className="icon-btn icon-btn-sm" onClick={signOut} aria-label="Sign out">
+         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+diff --git a/src/components/Viewer.tsx b/src/components/Viewer.tsx
+new file mode 100644
+index 0000000..31ed481
+--- /dev/null
++++ b/src/components/Viewer.tsx
+@@ -0,0 +1,33 @@
++"use client";
++// src/components/Viewer.tsx
++
++import { createContext, useContext } from "react";
++
++export type Viewer = {
++  /** Null only if the provider is missing — every rendered page has a session. */
++  uid: string | null;
++  name: string;
++  /** False for a view-only session. Mirrors requireMember on the server. */
++  canWrite: boolean;
++};
++
++/**
++ * Fails closed. A component rendered outside the provider shows no write
++ * affordances rather than buttons whose every request would come back 403 —
++ * the wrong default is visible immediately to a member and invisible to a
++ * guest, so it points the wrong way round.
++ */
++const ViewerContext = createContext<Viewer>({ uid: null, name: "", canWrite: false });
++
++export function ViewerProvider({ value, children }: { value: Viewer; children: React.ReactNode }) {
++  return <ViewerContext.Provider value={value}>{children}</ViewerContext.Provider>;
++}
++
++/**
++ * The session as the UI sees it. This decides what to *offer*; it never decides
++ * what's allowed. Anything gated on `canWrite` here is gated again on the
++ * server, because a hidden button is not a permission.
++ */
++export function useViewer(): Viewer {
++  return useContext(ViewerContext);
++}
+diff --git a/src/lib/session.ts b/src/lib/session.ts
+index 99d03f1..e8b536c 100644
+--- a/src/lib/session.ts
++++ b/src/lib/session.ts
+@@ -5,7 +5,28 @@ import { cookies } from "next/headers";
+ export const SESSION_COOKIE = "cala_session";
+ const MAX_AGE = 60 * 60 * 24 * 60; // 60 days — nobody wants to re-enter this on a beach
+ 
+-export type SessionPayload = { uid: string; name: string; admin: boolean };
++/**
++ * `guest` is a view-only session started from the login screen with no
++ * credentials. It reads everything a member can and writes nothing.
++ */
++export type Role = "member" | "guest";
++
++export type SessionPayload = { uid: string; name: string; admin: boolean; role: Role };
++
++/**
++ * Guests share one identity. It's never written to any table — a guest can't
++ * create a row — and it only ever appears in reads scoped to "mine", where it
++ * matches nothing: no favorites, no myReaction. Five characters can't collide
++ * with a nanoid, so it can't accidentally borrow a real member's data either.
++ */
++export const GUEST_UID = "guest";
++
++export const GUEST_SESSION: SessionPayload = {
++  uid: GUEST_UID,
++  name: "Guest",
++  admin: false,
++  role: "guest",
++};
+ 
+ function secret() {
+   const s = process.env.SESSION_SECRET;
+@@ -27,7 +48,17 @@ export async function readSession(token: string | undefined): Promise<SessionPay
+   try {
+     const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
+     if (typeof payload.uid !== "string") return null;
+-    return { uid: payload.uid, name: String(payload.name ?? ""), admin: payload.admin === true };
++    // A token without a role predates view-only mode, and every one of those
++    // was a member — sessions last 60 days, so treating the absence as "guest"
++    // would silently demote everyone already signed in.
++    const role: Role = payload.role === "guest" ? "guest" : "member";
++    return {
++      uid: payload.uid,
++      name: String(payload.name ?? ""),
++      // Belt and braces: a guest is never an admin, whatever the claim says.
++      admin: role === "member" && payload.admin === true,
++      role,
++    };
+   } catch {
+     return null;
+   }
+@@ -39,6 +70,7 @@ export async function currentUser(): Promise<SessionPayload | null> {
+ }
+ 
+ export class Unauthorized extends Error {}
++export class Forbidden extends Error {}
+ 
+ export async function requireUser(): Promise<SessionPayload> {
+   const user = await currentUser();
+@@ -46,6 +78,19 @@ export async function requireUser(): Promise<SessionPayload> {
+   return user;
+ }
+ 
++/**
++ * Requires a signed-in member. Every route that writes uses this instead of
++ * requireUser, which is what actually makes view-only mode view-only: hiding
++ * the buttons stops the app from offering a write, not from accepting one, and
++ * a guest holds a perfectly valid session cookie to send with a hand-rolled
++ * request.
++ */
++export async function requireMember(): Promise<SessionPayload> {
++  const user = await requireUser();
++  if (user.role === "guest") throw new Forbidden();
++  return user;
++}
++
+ /**
+  * Wraps a route handler so an Unauthorized throw becomes a 401 rather than an
+  * unhandled 500. Middleware already gates /api, so this is the second lock —
+@@ -61,6 +106,14 @@ export function guard<A extends unknown[]>(
+       if (err instanceof Unauthorized) {
+         return Response.json({ error: "Sign in to continue" }, { status: 401 });
+       }
++      if (err instanceof Forbidden) {
++        // 403, not 401: the session is fine, it just isn't allowed to do this.
++        // A 401 would send a perfectly valid guest back to the login screen.
++        return Response.json(
++          { error: "You're viewing without an account. Sign in to make changes." },
++          { status: 403 },
++        );
++      }
+       throw err;
+     }
+   };
+diff --git a/src/proxy.ts b/src/proxy.ts
+index b8b9743..04e34e9 100644
+--- a/src/proxy.ts
++++ b/src/proxy.ts
+@@ -2,7 +2,21 @@
+ import { NextResponse, type NextRequest } from "next/server";
+ import { readSession, SESSION_COOKIE } from "@/lib/session";
+ 
+-const PUBLIC = ["/login", "/api/auth/login", "/manifest.webmanifest", "/old_insta.webp"];
++const PUBLIC = [
++  "/login",
++  "/api/auth/login",
++  "/api/auth/guest",
++  "/manifest.webmanifest",
++  "/old_insta.webp",
++];
++
++/**
++ * Pages a view-only session has no business rendering. The API is gated route
++ * by route with requireMember — this is only about not serving a page whose
++ * entire purpose is a write, so a guest gets the map instead of an uploader
++ * that would 403 on every button.
++ */
++const MEMBERS_ONLY = ["/upload"];
+ 
+ export async function proxy(req: NextRequest) {
+   const { pathname } = req.nextUrl;
+@@ -11,7 +25,18 @@ export async function proxy(req: NextRequest) {
+   }
+ 
+   const session = await readSession(req.cookies.get(SESSION_COOKIE)?.value);
+-  if (session) return NextResponse.next();
++  if (session) {
++    if (
++      session.role === "guest" &&
++      MEMBERS_ONLY.some((p) => pathname === p || pathname.startsWith(p + "/"))
++    ) {
++      const home = req.nextUrl.clone();
++      home.pathname = "/";
++      home.search = "";
++      return NextResponse.redirect(home);
++    }
++    return NextResponse.next();
++  }
+ 
+   // API callers get a status code; humans get sent to the door.
+   if (pathname.startsWith("/api/")) {
+-- 
+2.43.0
+

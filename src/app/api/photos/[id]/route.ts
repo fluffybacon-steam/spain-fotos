@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, photos } from "@/db";
-import { requireUser, guard } from "@/lib/session";
+import { guard, requireMember } from "@/lib/session";
 import { deleteObjects } from "@/lib/r2";
 
 export const runtime = "nodejs";
@@ -38,7 +38,7 @@ const Patch = z.object({
  * photo is gone.
  */
 export const PATCH = guard(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
-  const me = await requireUser();
+  const me = await requireMember();
   const { id } = await ctx.params;
   const parsed = Patch.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
@@ -82,7 +82,7 @@ export const PATCH = guard(async (req: Request, ctx: { params: Promise<{ id: str
  * group's to correct, the photo itself is not the group's to remove.
  */
 export const DELETE = guard(async (_req: Request, ctx: { params: Promise<{ id: string }> }) => {
-  const me = await requireUser();
+  const me = await requireMember();
   const { id } = await ctx.params;
 
   const [row] = await db.select().from(photos).where(eq(photos.id, id)).limit(1);
