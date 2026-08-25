@@ -46,7 +46,7 @@ export default function Uploader() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
 
-  const boardRef = useRef<HTMLElement>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
 
   /** Every blob URL this component minted, so none of them outlive it. */
   const owned = useRef(new Set<string>());
