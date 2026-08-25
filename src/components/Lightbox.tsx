@@ -333,7 +333,7 @@ export default function Lightbox({
           <button
             type="button"
             className="icon-btn"
-            onClick={() => setConfirmDelete(true)}
+            onClick={() => setConfirmDeletes(true)}
             aria-label="Delete this photo"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">

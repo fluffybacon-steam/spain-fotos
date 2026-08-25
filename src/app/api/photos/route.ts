@@ -1,6 +1,6 @@
 // src/app/api/photos/route.ts
 import { NextResponse } from "next/server";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   db,
@@ -14,6 +14,7 @@ import {
 } from "@/db";
 import { requireUser, guard, requireMember } from "@/lib/session";
 import type { PhotoDTO } from "@/types";
+import { deleteObjects } from "@/lib/r2";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -166,6 +167,110 @@ export const POST = guard(async (req: Request) => {
 
   if (!rows.length) return NextResponse.json({ error: "Nothing to save" }, { status: 400 });
 
-  await db.insert(photos).values(rows).onConflictDoNothing();
-  return NextResponse.json({ ok: true, saved: rows.length });
+  // `returning()` after `onConflictDoNothing()` lists only the rows genuinely
+  // written, which is the one authoritative answer to "was this a duplicate?".
+  // photos_owner_hash_idx already knows; reporting `rows.length` regardless
+  // threw that answer away and told the uploader a photo had been saved when
+  // nothing had been.
+  const inserted = await db
+    .insert(photos)
+    .values(rows)
+    .onConflictDoNothing()
+    .returning({ id: photos.id });
+
+  const insertedIds = new Set(inserted.map((r) => r.id));
+  const refused = rows.filter((r) => !insertedIds.has(r.id));
+
+  // A refused row is one of two things and they need opposite answers. Either
+  // the (owner, hash) index rejected it — a real duplicate — or this id is
+  // already ours, meaning a save that landed before its response got lost is
+  // being retried. The retry has to read as success, or a flaky connection
+  // turns every re-send into a phantom duplicate.
+  const retried = refused.length
+    ? (
+        await db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(
+            and(
+              eq(photos.ownerId, me.uid),
+              inArray(
+                photos.id,
+                refused.map((r) => r.id),
+              ),
+            ),
+          )
+      ).map((r) => r.id)
+    : [];
+
+  const retriedIds = new Set(retried);
+  const duplicates = refused.filter((r) => !retriedIds.has(r.id)).map((r) => r.id);
+
+  return NextResponse.json({
+    ok: true,
+    saved: [...insertedIds, ...retriedIds],
+    duplicates,
+  });
+});
+
+
+const DeleteBody = z.object({ ids: z.array(z.string().min(8).max(32)).min(1).max(200) });
+ 
+/**
+ * Deletes many photos in one request.
+ *
+ * Same contract as PATCH /api/photos/location: partial success is normal, so
+ * the answer is a list of what was acted on rather than a status. A selection
+ * in the gallery routinely spans several people, and one photo you're not
+ * allowed to remove must not sink the other forty.
+ *
+ * Permission is per row and matches DELETE /api/photos/[id] exactly — the
+ * uploader, or an admin. Bulk is a convenience, never a wider grant.
+ */
+export const DELETE = guard(async (req: Request) => {
+  const me = await requireMember();
+  const parsed = DeleteBody.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+ 
+  const rows = await db
+    .select({
+      id: photos.id,
+      ownerId: photos.ownerId,
+      originalKey: photos.originalKey,
+      displayKey: photos.displayKey,
+      thumbKey: photos.thumbKey,
+    })
+    .from(photos)
+    .where(inArray(photos.id, parsed.data.ids));
+ 
+  const found = new Set(rows.map((r) => r.id));
+  // Asked to delete something that isn't there. The caller wanted it gone and
+  // it's gone, so it's reported as removable rather than as a failure — but
+  // separately, because "already gone" and "just deleted" aren't the same fact.
+  const alreadyGone = parsed.data.ids.filter((id) => !found.has(id));
+ 
+  const mine = rows.filter((r) => r.ownerId === me.uid || me.admin);
+  const refused = rows.filter((r) => !(r.ownerId === me.uid || me.admin)).map((r) => r.id);
+ 
+  if (mine.length) {
+    await db.delete(photos).where(
+      inArray(
+        photos.id,
+        mine.map((r) => r.id),
+      ),
+    );
+    // Rows first, objects second, and a failure here is swallowed: a stranded
+    // object is findable later by `npm run r2:audit`, whereas a row pointing at
+    // bytes that are already gone is a photo broken in the app right now.
+    await deleteObjects(mine.flatMap((r) => [r.originalKey, r.displayKey, r.thumbKey])).catch(
+      () => {},
+    );
+  }
+ 
+  return NextResponse.json({
+    ok: true,
+    deleted: mine.map((r) => r.id),
+    alreadyGone,
+    refused,
+  });
 });

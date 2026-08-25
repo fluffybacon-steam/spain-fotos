@@ -36,9 +36,6 @@ export default async function UploadPage() {
           <li style={{fontSize: '1.5rem'}}>
             You can test your images metadata <Link className="underline text-foam" href='/debug'>here</Link> before uploading
           </li>
-          <li style={{fontSize: '1.75rem'}}>
-            If this is too much, remember you can always just upload directly from your phone and be done with it!
-          </li>
           <li>
             In the likely event your photos are not auto-pinned, you can do so manually on the map page for precision pinning.
             <strong className="text-foam"> Or chose from my pre-selected locations that will show up under the uploads to make it easy.</strong> Or you don't have to pin them at all. its your life.
@@ -53,6 +50,9 @@ export default async function UploadPage() {
           </li>
           <li>
             Feedback, bugs and any suggestions you have are welcome. @ me. If this sucks, feel free to make a dropbox or something. It will only hurt my feelings a little bit
+          </li>
+           <li style={{fontSize: '1.5rem', lineHeight: '1'}}>
+            If this is too much, remember you can always just upload directly from your phone and be done with it!
           </li>
         </ul>
       </section>

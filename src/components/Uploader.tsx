@@ -46,6 +46,8 @@ export default function Uploader() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
 
+  const boardRef = useRef<HTMLElement>(null);
+
   /** Every blob URL this component minted, so none of them outlive it. */
   const owned = useRef(new Set<string>());
   /** Jobs still on screen. A poster arriving for a removed job is binned. */
@@ -53,6 +55,15 @@ export default function Uploader() {
   /** Cancels in-flight frame extraction when the page goes away. */
   const abort = useRef<AbortController | null>(null);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Hashes spoken for by the current run, mapped to the job holding them.
+   *
+   * /api/photos/check can only see what's already saved, and two workers run at
+   * once — so two copies of one file in the same selection both ask before
+   * either has written anything, and both get told it's new. This is the part
+   * the server can't answer.
+   */
+  const claimed = useRef(new Map<string, string>());
 
   useEffect(() => {
     abort.current = new AbortController();
@@ -70,10 +81,21 @@ export default function Uploader() {
   // `placeable` empties — and if that unmounted PlaceBoard, its "all filed"
   // state would go with it. Open it once, then only hide it.
   useEffect(() => {
-    if (placeable.length) setBoardOpen(true);
-    else if (!jobs.length) setBoardOpen(false);
+    if (placeable.length) {
+      setBoardOpen(true);
+    }
+    else if (!jobs.length) {
+      setBoardOpen(false);
+    } 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs]);
+
+  useEffect(()=>{
+    if(!boardOpen) return;
+    if (boardRef.current) {
+      boardRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [boardOpen])
 
   function track(url: string) {
     owned.current.add(url);
@@ -116,18 +138,19 @@ export default function Uploader() {
     patch(key, { error: undefined });
 
     try {
-      const res = await fetch("/api/photos", {
+      // DELETE /api/photos doesn't exist — the collection route only answers
+      // GET and POST, so this used to 405 every time. The per-photo route is
+      // the one that deletes, and it already owns the permission check and the
+      // R2 cleanup, so there's nothing to duplicate here.
+      const res = await fetch(`/api/photos/${encodeURIComponent(job.photoId)}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: [job.photoId] }),
       });
-      if (!res.ok) throw new Error(`Couldn't delete this (${res.status})`);
 
-      // Same contract as /api/photos/location: the server says what it acted
-      // on, and that's what the list believes.
-      const { deleted } = (await res.json()) as { deleted: string[] };
-      if (!deleted?.includes(job.photoId)) {
-        throw new Error("The server kept this one — reload and try again");
+      // 404 is this photo's row already being gone, which is the outcome we
+      // were asking for. Anything else is a real failure and keeps the row.
+      if (!res.ok && res.status !== 404) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `Couldn't delete this (${res.status})`);
       }
 
       drop(job);
@@ -216,6 +239,15 @@ export default function Uploader() {
     const hash = await contentHash(job.file);
     patch(job.key, { hash });
 
+    // Claim it for this run before asking the server, so the identical file
+    // sitting two rows down is caught without a round trip.
+    const claimedBy = claimed.current.get(hash);
+    if (claimedBy && claimedBy !== job.key) {
+      patch(job.key, { stage: "duplicate", progress: 1, duplicateOf: "you" });
+      return;
+    }
+    claimed.current.set(hash, job.key);
+
     const check = await fetch("/api/photos/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -293,11 +325,31 @@ export default function Uploader() {
     });
     if (!saveRes.ok) throw new Error("Uploaded, but couldn't be saved");
 
+    // The unique index has the last word. If it refused the row, the photo was
+    // already in the trip and the id from presign now points at nothing — so
+    // clear it, or the ❌ on this row aims a delete at a photo that was never
+    // created and the whole thing reads as a successful upload.
+    const { duplicates } = (await saveRes.json().catch(() => ({}))) as {
+      duplicates?: string[];
+    };
+    if (duplicates?.includes(slot.id)) {
+      patch(job.key, {
+        stage: "duplicate",
+        progress: 1,
+        duplicateOf: "you",
+        photoId: undefined,
+      });
+      return;
+    }
+
     patch(job.key, { stage: "done", progress: 1 });
   }
 
   async function start() {
     setRunning(true);
+    // Claims only describe the run in progress. Starting fresh means a retry
+    // after a failure isn't blocked by the claim its first attempt left behind.
+    claimed.current.clear();
     const pending = jobs.filter((j) => j.stage === "queued" || j.stage === "failed");
     const queue = [...pending];
 
@@ -307,6 +359,12 @@ export default function Uploader() {
         try {
           await runOne(job);
         } catch (err) {
+          // Nothing was saved, so let go of the hash — otherwise an identical
+          // file later in this run is called a duplicate of something that
+          // doesn't exist.
+          for (const [h, k] of claimed.current) {
+            if (k === job.key) claimed.current.delete(h);
+          }
           patch(job.key, {
             stage: "failed",
             error: err instanceof Error ? err.message : "Something went wrong",
@@ -489,7 +547,7 @@ export default function Uploader() {
           {/* Hidden rather than unmounted: PlaceBoard's record of what it filed
               is the confirmation, and it can't survive being torn down. */}
           {boardOpen && (
-            <div hidden={running}>
+            <div hidden={running} ref={boardRef}>
               <PlaceBoard
                 items={placeable}
                 onPlaced={(ids) =>

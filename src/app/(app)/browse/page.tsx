@@ -14,6 +14,7 @@ import { PRESET_PLACES } from "@/lib/preset-places";
 import { isLocated, type NamedPlace } from "@/lib/places";
 import { PIN_PARAM, stashPinTargets } from "@/lib/pin-handoff";
 import { writeLocation } from "@/lib/client/place-photos";
+import { deletePhotos } from "@/lib/client/delete-photos";
 import { formatDuration } from "@/lib/client/video";
 import type { ReactionKind } from "@/db/schema";
 import type { PersonDTO, PhotoDTO } from "@/types";
@@ -88,6 +89,8 @@ export default function BrowsePage() {
   const [people, setPeople] = useState<PersonDTO[]>([]);
   const [namedPlaces, setNamedPlaces] = useState<NamedPlace[]>([]);
   const [meId, setMeId] = useState<string | null>(null);
+  /** Admins may remove anyone's photo; everyone else only their own. */
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [owner, setOwner] = useState<string | null>(null); // null = everyone
   const [mark, setMark] = useState<Mark>({ kind: "any" });
@@ -98,6 +101,10 @@ export default function BrowsePage() {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [downloaded, setDownloaded] = useState<number | null>(null); // null = idle
   const [placing, setPlacing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  /** Set when a run couldn't take everything, so the tray can say why. */
+  const [deleteNote, setDeleteNote] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -111,7 +118,7 @@ export default function BrowsePage() {
         const data = await meRes.json();
         setPeople(data.people);
         setMeId(data.me?.uid ?? null);
-        console.log("me", data.me, "people", data.people);
+        setIsAdmin(data.me?.admin === true);
       }
       if (placeRes.ok) setNamedPlaces((await placeRes.json()).places);
       setLoading(false);
@@ -241,6 +248,8 @@ export default function BrowsePage() {
     setSelectMode(false);
     setSelected(new Set());
     setPlacing(false);
+    setConfirmDelete(false);
+    setDeleteNote(null);
   }, []);
 
   // Escape leaves select mode, but only when the lightbox is closed, since it
@@ -253,11 +262,14 @@ export default function BrowsePage() {
       // Escape first — otherwise one keypress closes it *and* throws away the
       // selection behind it.
       if (placing) setPlacing(false);
+      // The confirm is the topmost thing while it's up, so it takes Escape
+      // first — otherwise one keypress dismisses it and drops the selection.
+      else if (confirmDelete) setConfirmDelete(false);
       else exitSelectMode();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectMode, index, placing, exitSelectMode]);
+  }, [selectMode, index, placing, confirmDelete, exitSelectMode]);
 
   function toggleSelectAllShown() {
     setSelected((prev) => {
@@ -314,6 +326,42 @@ export default function BrowsePage() {
     } finally {
       setDownloaded(null);
     }
+  }
+
+  /**
+   * Deletes the selection, then trusts the server's account of what went.
+   *
+   * No optimistic update: unlike a pin, this can't be rolled back if the answer
+   * disagrees, so nothing leaves the grid until the server confirms it. A
+   * selection spanning several people is normal — you keep the ones you weren't
+   * allowed to remove, selected, with a line saying so.
+   */
+  async function deleteSelected() {
+    if (selected.size === 0 || deleting) return;
+    setDeleting(true);
+    setDeleteNote(null);
+
+    const asked = [...selected];
+    const { removed, refused, failed } = await deletePhotos(asked);
+
+    if (removed.size) {
+      setPhotos((prev) => prev.filter((p) => !removed.has(p.id)));
+      setSelected((prev) => {
+        const next = new Set<string>();
+        for (const id of prev) if (!removed.has(id)) next.add(id);
+        return next;
+      });
+    }
+
+    const notes: string[] = [];
+    if (removed.size) notes.push(`Deleted ${removed.size}`);
+    if (refused.size) notes.push(`${refused.size} not yours to delete`);
+    if (failed) notes.push("some couldn't be reached — try again");
+    setDeleteNote(notes.length ? notes.join(" · ") : "Nothing was deleted");
+
+    setDeleting(false);
+    setConfirmDelete(false);
+    if (removed.size === asked.length) exitSelectMode();
   }
 
   function removePhoto(photoId: string) {
@@ -597,6 +645,7 @@ export default function BrowsePage() {
                 ? "Tap fotos to select"
                 : `${selected.size} selected · ${formatBytes(selectedBytes)}`}
             </p>
+
             <button
               type="button"
               className="btn btn-quiet btn-sm"
@@ -616,6 +665,16 @@ export default function BrowsePage() {
                 Set location
               </button>
             )}
+            {canWrite && (
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                onClick={() => setConfirmDelete(true)}
+                disabled={selected.size === 0 || downloading || deleting}
+              >
+                Delete
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -626,6 +685,45 @@ export default function BrowsePage() {
                 ? `Downloading ${downloaded} / ${selectedPhotos.length}`
                 : `Download${selected.size ? ` ${selected.size}` : ""}`}
             </button>
+
+            {/* Deleting is the one action here with no way back, so it asks —
+                and says whose photos are about to go, since an admin's
+                selection can span the whole trip. */}
+            {confirmDelete && (
+              <div className="flex w-full flex-wrap items-center gap-2 border-t border-hairline pt-2">
+                <p className="coord mr-auto">
+                  Delete {selected.size} permanently?
+                  {(() => {
+                    const others = selectedPhotos.filter((p) => p.ownerId !== meId).length;
+                    if (!others) return " This can't be undone.";
+                    return isAdmin
+                      ? ` ${others} belong to other people. This can't be undone.`
+                      : ` ${others} aren't yours and will be skipped.`;
+                  })()}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-quiet btn-sm"
+                  onClick={() => setConfirmDelete(false)}
+                  disabled={deleting}
+                >
+                  Keep them
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{ background: "var(--color-coral)", color: "var(--color-deep)" }}
+                  onClick={deleteSelected}
+                  disabled={deleting}
+                >
+                  {deleting ? "Deleting…" : `Delete ${selected.size}`}
+                </button>
+              </div>
+            )}
+
+            {deleteNote && !confirmDelete && (
+              <p className="coord w-full border-t border-hairline pt-2">{deleteNote}</p>
+            )}
           </div>
         </div>
       )}

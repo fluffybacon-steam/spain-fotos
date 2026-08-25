@@ -1,5 +1,6 @@
 "use client";
 // src/app/(app)/debug/page.tsx
+import OrphanRescue from "@/components/OrphanRescue";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -299,6 +300,12 @@ export default function DebugPage() {
           );
         })}
       </div>
+
+      <section className="mb-6 border-b border-hairline pb-6">
+        <p className="eyebrow mb-1">STRANDED UPLOADS</p>
+        <OrphanRescue />
+      </section>
+      
     </main>
   );
 }
