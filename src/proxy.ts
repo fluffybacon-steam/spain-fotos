@@ -42,9 +42,14 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Sign in to continue" }, { status: 401 });
   }
+  // The query string comes along. A shared `/browse?image_id=…` handed to
+  // someone who isn't signed in used to arrive at the gallery with the photo
+  // stripped off it, which is the one case the link existed for.
+  const next = pathname + req.nextUrl.search;
   const url = req.nextUrl.clone();
   url.pathname = "/login";
-  url.searchParams.set("next", pathname);
+  url.search = ""; // drop the original params; they're inside `next` now
+  url.searchParams.set("next", next);
   return NextResponse.redirect(url);
 }
 

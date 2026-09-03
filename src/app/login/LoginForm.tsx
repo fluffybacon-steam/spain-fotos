@@ -4,6 +4,17 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+/**
+ * Where to go after signing in. `next` is written by the middleware, but it
+ * arrives in a URL anyone can hand-craft, so only a path on this site is
+ * honoured — `//evil.example` is a protocol-relative URL, not a path, and is
+ * exactly what an open redirect looks like.
+ */
+function safeNext(next: string | null): string {
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/";
+  return next;
+}
+
 export default function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
@@ -27,7 +38,7 @@ export default function LoginForm() {
         setError(data.error ?? "Sign in failed");
         return;
       }
-      router.replace(params.get("next") || "/");
+      router.replace(safeNext(params.get("next")));
       router.refresh();
     } catch {
       setError("Couldn't reach the server. Check your connection.");
@@ -51,7 +62,7 @@ export default function LoginForm() {
         setError("Couldn't start a view-only session");
         return;
       }
-      router.replace(params.get("next") || "/");
+      router.replace(safeNext(params.get("next")));
       router.refresh();
     } catch {
       setError("Couldn't reach the server. Check your connection.");

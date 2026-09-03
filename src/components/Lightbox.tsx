@@ -9,6 +9,8 @@ import { nearestNamed, type NamedPlace } from "@/lib/places";
 import Comments from "./Comments";
 import { useViewer } from "./Viewer";
 import { formatDuration } from "@/lib/client/video";
+import ZoomableImage, { type ZoomHandle } from "./ZoomableImage";
+import { sharePhotoLink } from "@/lib/photo-link";
 
 type Props = {
   photos: PhotoDTO[];
@@ -33,6 +35,9 @@ type Props = {
   onToggleSelect?: (photoId: string) => void;
 };
 
+/** How far one arrow key press moves a zoomed photo, in CSS pixels. */
+const PAN_STEP = 80;
+
 export default function Lightbox({
   photos,
   index,
@@ -49,6 +54,11 @@ export default function Lightbox({
 }: Props) {
   const photo = photos[index];
   const touchStart = useRef<{ x: number; y: number } | null>(null);
+  /** Set the moment a second finger lands, so a pinch can't end as a swipe. */
+  const multiTouch = useRef(false);
+  const zoom = useRef<ZoomHandle | null>(null);
+  const [zoomed, setZoomed] = useState(false);
+  const [shareNote, setShareNote] = useState<string | null>(null);
   const [showMeta, setShowMeta] = useState(true);
   const [showComments, setShowComments] = useState(false);
   const [playbackFailed, setPlaybackFailed] = useState(false);
@@ -108,9 +118,22 @@ export default function Lightbox({
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
         return;
       }
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowRight") go(1);
-      else if (e.key === "ArrowLeft") go(-1);
+      // Escape backs out one level at a time: a zoomed photo returns to fitting
+      // the screen before the viewer closes, so a stray keypress can't lose
+      // both the magnification and the place in the gallery at once.
+      if (e.key === "Escape") {
+        if (zoomed) zoom.current?.reset();
+        else onClose();
+      }
+      // While zoomed the arrows move around the photo, which is the thing
+      // actually being read; unzoomed they move between photos.
+      else if (e.key === "ArrowRight") zoomed ? zoom.current?.panBy(-PAN_STEP, 0) : go(1);
+      else if (e.key === "ArrowLeft") zoomed ? zoom.current?.panBy(PAN_STEP, 0) : go(-1);
+      else if (e.key === "ArrowDown" && zoomed) zoom.current?.panBy(0, -PAN_STEP);
+      else if (e.key === "ArrowUp" && zoomed) zoom.current?.panBy(0, PAN_STEP);
+      else if (e.key === "+" || e.key === "=") zoom.current?.zoomBy(1.4);
+      else if (e.key === "-" || e.key === "_") zoom.current?.zoomBy(1 / 1.4);
+      else if (e.key === "0") zoom.current?.reset();
       else if (e.key === "i") setShowMeta((v) => !v);
       else if (e.key === "s") toggleSelect();
       else if (e.key === "f") void toggleFavorite(); // no-ops for a guest
@@ -123,7 +146,7 @@ export default function Lightbox({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [go, onClose, toggleSelect, toggleFavorite]);
+  }, [go, onClose, toggleSelect, toggleFavorite, zoomed]);
 
   // Warm the neighbours so arrowing through feels instant.
   useEffect(() => {
@@ -143,6 +166,8 @@ export default function Lightbox({
     setCommentCount(null);
     setPlaybackFailed(false);
     setConfirmDelete(false);
+    // "Link copied" refers to a photo, so it can't outlive the one on screen.
+    setShareNote(null);
     // An open editor must not carry a half-typed date onto the next photo.
     setEditingTime(false);
     setSavingTime(false);
@@ -205,6 +230,17 @@ export default function Lightbox({
     }
   }
 
+  /**
+   * Copies (or hands to the share sheet) a link that reopens this exact photo.
+   * Always points at Browse, even from the map viewer — see lib/photo-link.
+   */
+  async function share() {
+    const result = await sharePhotoLink(photo.id, photo.caption ?? `Foto by ${photo.ownerName}`);
+    if (result === "shared") return; // the sheet already said so
+    setShareNote(result === "copied" ? "Link copied" : "Couldn't copy the link");
+    window.setTimeout(() => setShareNote(null), 2200);
+  }
+
   function startEditingTime() {
     setTimeDraft(toDateTimeLocal(photo.takenAt));
     setTimeError(null);
@@ -229,10 +265,32 @@ export default function Lightbox({
         </button>
 
         <div className="min-w-0 flex-1">
-          <p className="coord">
-            {index + 1} / {photos.length}
+          <p className="coord truncate">
+            {shareNote ?? `${index + 1} / ${photos.length}`}
           </p>
         </div>
+
+        {/* A pointer has no pinch, so the gesture needs a button behind it.
+            Hidden for video, which zooms with its own controls or not at all. */}
+        {photo.mediaType !== "video" && (
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => zoom.current?.toggle()}
+            aria-label={zoomed ? "Fit photo to screen" : "Zoom in"}
+            aria-pressed={zoomed}
+            title={zoomed ? "Fit to screen (0)" : "Zoom in (+, or double-tap)"}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.4" stroke="currentColor" strokeWidth="1.4" />
+              <path d="M10.4 10.4L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M5 7h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              {!zoomed && (
+                <path d="M7 5v4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              )}
+            </svg>
+          </button>
+        )}
 
         {canWrite && (
         <button
@@ -342,6 +400,26 @@ export default function Lightbox({
           </button>
         )}
 
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => void share()}
+          aria-label="Copy a link to this foto"
+          title="Copy a link to this foto"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="12" cy="3.6" r="1.9" stroke="currentColor" strokeWidth="1.3" />
+            <circle cx="4" cy="8" r="1.9" stroke="currentColor" strokeWidth="1.3" />
+            <circle cx="12" cy="12.4" r="1.9" stroke="currentColor" strokeWidth="1.3" />
+            <path
+              d="M5.7 7.1l4.6-2.6M5.7 8.9l4.6 2.6"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+
         <a
           className="icon-btn"
           href={photo.downloadUrl}
@@ -358,18 +436,37 @@ export default function Lightbox({
       <div
         className="lightbox-stage relative"
         onTouchStart={(e) => {
+          // A pinch starts as one finger and becomes two. Measuring the first
+          // against whichever finger happens to lift last is how a pinch used
+          // to end up two photos away — so a second finger voids the gesture
+          // outright rather than being reasoned about at the end.
+          if (e.touches.length > 1) {
+            multiTouch.current = true;
+            touchStart.current = null;
+            return;
+          }
+          multiTouch.current = false;
           const t = e.touches[0];
           touchStart.current = { x: t.clientX, y: t.clientY };
         }}
+        onTouchMove={(e) => {
+          if (e.touches.length > 1) {
+            multiTouch.current = true;
+            touchStart.current = null;
+          }
+        }}
         onTouchEnd={(e) => {
           const start = touchStart.current;
-          if (!start) return;
+          touchStart.current = null;
+          // Fingers still down: this is part of a gesture, not the end of one.
+          if (!start || multiTouch.current || e.touches.length > 0) return;
+          // A zoomed photo owns one-finger drags — that's panning, not paging.
+          if (zoomed) return;
           const t = e.changedTouches[0];
           const dx = t.clientX - start.x;
           const dy = t.clientY - start.y;
-          // Horizontal intent only, so a vertical scroll or pinch isn't hijacked.
+          // Horizontal intent only, so a vertical drag isn't hijacked.
           if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.6) go(dx < 0 ? 1 : -1);
-          touchStart.current = null;
         }}
       >
         {photo.mediaType === "video" ? (
@@ -403,12 +500,14 @@ export default function Lightbox({
             />
           )
         ) : (
-          <img
-            key={photo.id}
+          <ZoomableImage
+            ref={zoom}
+            resetKey={photo.id}
             src={photo.displayUrl}
             alt={photo.caption ?? `Photo by ${photo.ownerName}`}
             width={photo.width}
             height={photo.height}
+            onZoomChange={setZoomed}
           />
         )}
 

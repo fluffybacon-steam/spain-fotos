@@ -2,7 +2,7 @@
 
 // src/app/(app)/browse/page.tsx
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Avatar from "@/components/Avatar";
@@ -13,6 +13,7 @@ import LocationSheet from "@/components/LocationSheet";
 import { PRESET_PLACES } from "@/lib/preset-places";
 import { isLocated, type NamedPlace } from "@/lib/places";
 import { PIN_PARAM, stashPinTargets } from "@/lib/pin-handoff";
+import { IMAGE_PARAM } from "@/lib/photo-link";
 import { writeLocation } from "@/lib/client/place-photos";
 import { deletePhotos } from "@/lib/client/delete-photos";
 import { formatDuration } from "@/lib/client/video";
@@ -82,6 +83,22 @@ function matchesMark(photo: PhotoDTO, mark: Mark): boolean {
 
 const NO_TALLY = { n: 0, bytes: 0 };
 
+/**
+ * This page's own URL with the open photo added or removed, path-relative so it
+ * can go straight into the History API. Everything else in the query string
+ * survives — a link is one more thing on the address, not a replacement for it.
+ */
+function urlWithPhoto(photoId: string | null): string {
+  const url = new URL(window.location.href);
+  if (photoId) url.searchParams.set(IMAGE_PARAM, photoId);
+  else url.searchParams.delete(IMAGE_PARAM);
+  return url.pathname + url.search + url.hash;
+}
+
+function photoInUrl(): string | null {
+  return new URLSearchParams(window.location.search).get(IMAGE_PARAM);
+}
+
 export default function BrowsePage() {
   const router = useRouter();
   const { canWrite } = useViewer();
@@ -131,6 +148,96 @@ export default function BrowsePage() {
   );
 
   const filtered = Boolean(owner) || mark.kind !== "any";
+
+  /* ── Shareable links ──────────────────────────────────────────────────────
+   *
+   * `/browse?image_id=…` opens the viewer on one photo. The id is the whole
+   * address: no filter state travels with it, because the person opening a
+   * link wants the photo, not a reconstruction of whichever chips the sender
+   * happened to have lit.
+   */
+
+  /** An id read off the URL that hasn't been opened yet — photos may still be loading. */
+  const [wanted, setWanted] = useState<string | null>(null);
+  const [linkMissing, setLinkMissing] = useState(false);
+  /** True while a history entry we pushed is on top, so Back can pop it. */
+  const pushedEntry = useRef(false);
+
+  // Read straight off `window` rather than through useSearchParams: this page
+  // is a client component with no Suspense boundary above it, and
+  // useSearchParams would opt the whole route out of prerendering.
+  useEffect(() => {
+    const id = photoInUrl();
+    if (id) setWanted(id);
+  }, []);
+
+  /** Opens a photo and gives it a history entry, so Back closes the viewer. */
+  const openAt = useCallback((i: number, photoId: string) => {
+    setIndex(i);
+    window.history.pushState(null, "", urlWithPhoto(photoId));
+    pushedEntry.current = true;
+  }, []);
+
+  const closeViewer = useCallback(() => {
+    setIndex(null);
+    if (pushedEntry.current) {
+      pushedEntry.current = false;
+      // Pops the entry the open pushed, which leaves the address bar clean
+      // without burying the gallery under a dead forward step.
+      window.history.back();
+    } else {
+      // Arrived on a link, so there's nothing of ours to pop — just drop the id.
+      window.history.replaceState(null, "", urlWithPhoto(null));
+    }
+  }, []);
+
+  // The address follows whichever photo is open, however it got there: arrow
+  // keys, a swipe, or the one after a deletion. Replace rather than push, so
+  // paging through forty photos doesn't cost forty presses to get back out.
+  useEffect(() => {
+    if (index === null) return;
+    const id = shown[index]?.id;
+    if (id && id !== photoInUrl()) window.history.replaceState(null, "", urlWithPhoto(id));
+  }, [index, shown]);
+
+  // Back and forward: the URL says what should be open.
+  useEffect(() => {
+    function onPop() {
+      const id = photoInUrl();
+      pushedEntry.current = Boolean(id);
+      if (!id) {
+        setIndex(null);
+        return;
+      }
+      const at = shown.findIndex((p) => p.id === id);
+      if (at >= 0) setIndex(at);
+      else setWanted(id); // filtered out, or the gallery isn't in yet
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [shown]);
+
+  // Resolve a wanted id once there are photos to look in.
+  useEffect(() => {
+    if (!wanted || loading) return;
+    const photo = photos.find((p) => p.id === wanted);
+    if (!photo) {
+      setWanted(null);
+      setLinkMissing(true);
+      window.history.replaceState(null, "", urlWithPhoto(null));
+      return;
+    }
+    const at = shown.indexOf(photo);
+    if (at === -1) {
+      // The photo exists but a filter is hiding it. A link outranks the chips —
+      // clearing them re-runs this effect with the photo back in view.
+      setOwner(null);
+      setMark({ kind: "any" });
+      return;
+    }
+    setWanted(null);
+    setIndex(at);
+  }, [wanted, loading, photos, shown]);
 
   const allNames = useMemo(() => [...PRESET_PLACES, ...namedPlaces], [namedPlaces]);
 
@@ -498,6 +605,23 @@ export default function BrowsePage() {
         })}
       </div>
 
+      {/* A link can outlive its photo. Say so, rather than opening the gallery
+          on nothing in particular and letting the sender look like a liar. */}
+      {linkMissing && (
+        <div className="glass mb-4 flex flex-wrap items-center gap-2 rounded-[4px] px-3 py-2">
+          <p className="coord mr-auto">
+            That foto isn&apos;t here — it may have been deleted since the link was sent.
+          </p>
+          <button
+            type="button"
+            className="btn btn-quiet btn-sm"
+            onClick={() => setLinkMissing(false)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {loading && <p className="coord animate-pulse px-1">Loading gallery</p>}
 
       {!loading && shown.length === 0 && (
@@ -558,7 +682,9 @@ export default function BrowsePage() {
                   key={photo.id}
                   type="button"
                   onClick={() =>
-                    selectMode ? toggleSelected(photo.id) : setIndex(shown.indexOf(photo))
+                    selectMode
+                      ? toggleSelected(photo.id)
+                      : openAt(shown.indexOf(photo), photo.id)
                   }
                   aria-pressed={selectMode ? isSelected : undefined}
                   className={
@@ -760,7 +886,7 @@ export default function BrowsePage() {
             setSelectMode(true);
             toggleSelected(id);
           }}
-          onClose={() => setIndex(null)}
+          onClose={closeViewer}
         />
       )}
     </main>
