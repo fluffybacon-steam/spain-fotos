@@ -911,7 +911,7 @@ li[data-stage="duplicate"] {
 }
 
 .lookAtMe{
-  animation: lookAtMe 1s infinite;
+  animation: lookAtMe 1s linear 5s infinite alternate;
 }
 
 @keyframes lookAtMe {
