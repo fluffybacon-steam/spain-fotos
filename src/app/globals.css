@@ -909,3 +909,16 @@ li[data-stage="duplicate"] {
 .grid.unplaced:has(> :nth-last-child(-n+6):first-child) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+
+.lookAtMe{
+  animation: lookAtMe 1s infinite;
+}
+
+@keyframes lookAtMe {
+  from{
+    scale: 0.89
+  }
+  to {
+    scale: 1.25
+  }
+}

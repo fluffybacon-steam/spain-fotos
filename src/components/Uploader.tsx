@@ -436,7 +436,7 @@ export default function Uploader() {
             </p>
             <button
               type="button"
-              className="btn btn-primary"
+              className={queued ? "btn btn-primary lookAtMe" : "btn btn-primary"}
               onClick={start}
               disabled={running || queued === 0}
             >

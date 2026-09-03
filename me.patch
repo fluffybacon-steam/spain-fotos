@@ -1,0 +1,976 @@
+diff --git a/src/app/(app)/browse/page.tsx b/src/app/(app)/browse/page.tsx
+index c696f63..f53df0c 100644
+--- a/src/app/(app)/browse/page.tsx
++++ b/src/app/(app)/browse/page.tsx
+@@ -2,7 +2,7 @@
+ 
+ // src/app/(app)/browse/page.tsx
+ 
+-import { useCallback, useEffect, useMemo, useState } from "react";
++import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import Link from "next/link";
+ import { useRouter } from "next/navigation";
+ import Avatar from "@/components/Avatar";
+@@ -13,6 +13,7 @@ import LocationSheet from "@/components/LocationSheet";
+ import { PRESET_PLACES } from "@/lib/preset-places";
+ import { isLocated, type NamedPlace } from "@/lib/places";
+ import { PIN_PARAM, stashPinTargets } from "@/lib/pin-handoff";
++import { IMAGE_PARAM } from "@/lib/photo-link";
+ import { writeLocation } from "@/lib/client/place-photos";
+ import { deletePhotos } from "@/lib/client/delete-photos";
+ import { formatDuration } from "@/lib/client/video";
+@@ -82,6 +83,22 @@ function matchesMark(photo: PhotoDTO, mark: Mark): boolean {
+ 
+ const NO_TALLY = { n: 0, bytes: 0 };
+ 
++/**
++ * This page's own URL with the open photo added or removed, path-relative so it
++ * can go straight into the History API. Everything else in the query string
++ * survives — a link is one more thing on the address, not a replacement for it.
++ */
++function urlWithPhoto(photoId: string | null): string {
++  const url = new URL(window.location.href);
++  if (photoId) url.searchParams.set(IMAGE_PARAM, photoId);
++  else url.searchParams.delete(IMAGE_PARAM);
++  return url.pathname + url.search + url.hash;
++}
++
++function photoInUrl(): string | null {
++  return new URLSearchParams(window.location.search).get(IMAGE_PARAM);
++}
++
+ export default function BrowsePage() {
+   const router = useRouter();
+   const { canWrite } = useViewer();
+@@ -132,6 +149,96 @@ export default function BrowsePage() {
+ 
+   const filtered = Boolean(owner) || mark.kind !== "any";
+ 
++  /* ── Shareable links ──────────────────────────────────────────────────────
++   *
++   * `/browse?image_id=…` opens the viewer on one photo. The id is the whole
++   * address: no filter state travels with it, because the person opening a
++   * link wants the photo, not a reconstruction of whichever chips the sender
++   * happened to have lit.
++   */
++
++  /** An id read off the URL that hasn't been opened yet — photos may still be loading. */
++  const [wanted, setWanted] = useState<string | null>(null);
++  const [linkMissing, setLinkMissing] = useState(false);
++  /** True while a history entry we pushed is on top, so Back can pop it. */
++  const pushedEntry = useRef(false);
++
++  // Read straight off `window` rather than through useSearchParams: this page
++  // is a client component with no Suspense boundary above it, and
++  // useSearchParams would opt the whole route out of prerendering.
++  useEffect(() => {
++    const id = photoInUrl();
++    if (id) setWanted(id);
++  }, []);
++
++  /** Opens a photo and gives it a history entry, so Back closes the viewer. */
++  const openAt = useCallback((i: number, photoId: string) => {
++    setIndex(i);
++    window.history.pushState(null, "", urlWithPhoto(photoId));
++    pushedEntry.current = true;
++  }, []);
++
++  const closeViewer = useCallback(() => {
++    setIndex(null);
++    if (pushedEntry.current) {
++      pushedEntry.current = false;
++      // Pops the entry the open pushed, which leaves the address bar clean
++      // without burying the gallery under a dead forward step.
++      window.history.back();
++    } else {
++      // Arrived on a link, so there's nothing of ours to pop — just drop the id.
++      window.history.replaceState(null, "", urlWithPhoto(null));
++    }
++  }, []);
++
++  // The address follows whichever photo is open, however it got there: arrow
++  // keys, a swipe, or the one after a deletion. Replace rather than push, so
++  // paging through forty photos doesn't cost forty presses to get back out.
++  useEffect(() => {
++    if (index === null) return;
++    const id = shown[index]?.id;
++    if (id && id !== photoInUrl()) window.history.replaceState(null, "", urlWithPhoto(id));
++  }, [index, shown]);
++
++  // Back and forward: the URL says what should be open.
++  useEffect(() => {
++    function onPop() {
++      const id = photoInUrl();
++      pushedEntry.current = Boolean(id);
++      if (!id) {
++        setIndex(null);
++        return;
++      }
++      const at = shown.findIndex((p) => p.id === id);
++      if (at >= 0) setIndex(at);
++      else setWanted(id); // filtered out, or the gallery isn't in yet
++    }
++    window.addEventListener("popstate", onPop);
++    return () => window.removeEventListener("popstate", onPop);
++  }, [shown]);
++
++  // Resolve a wanted id once there are photos to look in.
++  useEffect(() => {
++    if (!wanted || loading) return;
++    const photo = photos.find((p) => p.id === wanted);
++    if (!photo) {
++      setWanted(null);
++      setLinkMissing(true);
++      window.history.replaceState(null, "", urlWithPhoto(null));
++      return;
++    }
++    const at = shown.indexOf(photo);
++    if (at === -1) {
++      // The photo exists but a filter is hiding it. A link outranks the chips —
++      // clearing them re-runs this effect with the photo back in view.
++      setOwner(null);
++      setMark({ kind: "any" });
++      return;
++    }
++    setWanted(null);
++    setIndex(at);
++  }, [wanted, loading, photos, shown]);
++
+   const allNames = useMemo(() => [...PRESET_PLACES, ...namedPlaces], [namedPlaces]);
+ 
+   // Everything with coordinates, wherever it sits in the gallery: the spots on
+@@ -498,6 +605,23 @@ export default function BrowsePage() {
+         })}
+       </div>
+ 
++      {/* A link can outlive its photo. Say so, rather than opening the gallery
++          on nothing in particular and letting the sender look like a liar. */}
++      {linkMissing && (
++        <div className="glass mb-4 flex flex-wrap items-center gap-2 rounded-[4px] px-3 py-2">
++          <p className="coord mr-auto">
++            That foto isn&apos;t here — it may have been deleted since the link was sent.
++          </p>
++          <button
++            type="button"
++            className="btn btn-quiet btn-sm"
++            onClick={() => setLinkMissing(false)}
++          >
++            Dismiss
++          </button>
++        </div>
++      )}
++
+       {loading && <p className="coord animate-pulse px-1">Loading gallery</p>}
+ 
+       {!loading && shown.length === 0 && (
+@@ -558,7 +682,9 @@ export default function BrowsePage() {
+                   key={photo.id}
+                   type="button"
+                   onClick={() =>
+-                    selectMode ? toggleSelected(photo.id) : setIndex(shown.indexOf(photo))
++                    selectMode
++                      ? toggleSelected(photo.id)
++                      : openAt(shown.indexOf(photo), photo.id)
+                   }
+                   aria-pressed={selectMode ? isSelected : undefined}
+                   className={
+@@ -760,7 +886,7 @@ export default function BrowsePage() {
+             setSelectMode(true);
+             toggleSelected(id);
+           }}
+-          onClose={() => setIndex(null)}
++          onClose={closeViewer}
+         />
+       )}
+     </main>
+diff --git a/src/app/globals.css b/src/app/globals.css
+index e371494..c99bf4a 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -508,20 +508,63 @@ body {
+   }
+ }
+ .lightbox-stage {
++  /* The zoom frame is positioned against this, so it can't be left to a
++     utility class on the element. */
++  position: relative;
+   flex: 1;
+   min-height: 0;
+   display: grid;
+   place-items: center;
+   padding: 12px;
++  overflow: hidden;
++  /* Video keeps the browser's gestures. A photo takes them away — see below. */
+   touch-action: pan-y pinch-zoom;
+ }
+-.lightbox-stage img {
++
++/**
++ * The zoom surface.
++ *
++ * `touch-action: none` is the whole point of it. The browser's own pinch zooms
++ * the visual viewport, and this viewer is `position: fixed`: pinching scaled
++ * the header and footer off the edges of the screen along with the photo, and
++ * left the photo no more detailed than it started. Refusing the gesture here
++ * hands it to the component, which moves the photo inside this box and leaves
++ * the chrome alone.
++ */
++.zoom-frame {
++  position: absolute;
++  inset: 12px;
++  overflow: hidden;
++  touch-action: none;
++  -webkit-user-select: none;
++  user-select: none;
++}
++.zoom-frame img {
+   position: absolute;
+-  max-width: 100%;
+-  max-height: 100%;
++  inset: 0;
++  width: 100%;
++  height: 100%;
+   object-fit: contain;
++  transform-origin: 50% 50%;
++  -webkit-user-drag: none;
+   border-radius: 2px;
+-  box-shadow: 0 24px 70px rgb(0 0 0 / 0.75);
++  /* `contain` leaves the rest of the box transparent, so a drop-shadow traces
++     the photo's own edges instead of boxing the whole frame. It goes while
++     zoomed: it would be repainted every frame of a pan, and a photo larger
++     than the screen has no visible edge to lift anyway. */
++  filter: drop-shadow(0 18px 45px rgb(0 0 0 / 0.7));
++}
++.zoom-frame[data-zoomed] img {
++  filter: none;
++  cursor: grab;
++}
++.zoom-frame[data-zoomed] img:active {
++  cursor: grabbing;
++}
++@media (prefers-reduced-motion: reduce) {
++  .zoom-frame img {
++    transition: none !important;
++  }
+ }
+ 
+ .icon-btn {
+diff --git a/src/app/login/LoginForm.tsx b/src/app/login/LoginForm.tsx
+index c9e16b4..2448c82 100644
+--- a/src/app/login/LoginForm.tsx
++++ b/src/app/login/LoginForm.tsx
+@@ -4,6 +4,17 @@
+ import { useState } from "react";
+ import { useRouter, useSearchParams } from "next/navigation";
+ 
++/**
++ * Where to go after signing in. `next` is written by the middleware, but it
++ * arrives in a URL anyone can hand-craft, so only a path on this site is
++ * honoured — `//evil.example` is a protocol-relative URL, not a path, and is
++ * exactly what an open redirect looks like.
++ */
++function safeNext(next: string | null): string {
++  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/";
++  return next;
++}
++
+ export default function LoginForm() {
+   const router = useRouter();
+   const params = useSearchParams();
+@@ -27,7 +38,7 @@ export default function LoginForm() {
+         setError(data.error ?? "Sign in failed");
+         return;
+       }
+-      router.replace(params.get("next") || "/");
++      router.replace(safeNext(params.get("next")));
+       router.refresh();
+     } catch {
+       setError("Couldn't reach the server. Check your connection.");
+@@ -51,7 +62,7 @@ export default function LoginForm() {
+         setError("Couldn't start a view-only session");
+         return;
+       }
+-      router.replace(params.get("next") || "/");
++      router.replace(safeNext(params.get("next")));
+       router.refresh();
+     } catch {
+       setError("Couldn't reach the server. Check your connection.");
+diff --git a/src/components/Lightbox.tsx b/src/components/Lightbox.tsx
+index 1633c64..2e92196 100644
+--- a/src/components/Lightbox.tsx
++++ b/src/components/Lightbox.tsx
+@@ -9,6 +9,8 @@ import { nearestNamed, type NamedPlace } from "@/lib/places";
+ import Comments from "./Comments";
+ import { useViewer } from "./Viewer";
+ import { formatDuration } from "@/lib/client/video";
++import ZoomableImage, { type ZoomHandle } from "./ZoomableImage";
++import { sharePhotoLink } from "@/lib/photo-link";
+ 
+ type Props = {
+   photos: PhotoDTO[];
+@@ -33,6 +35,9 @@ type Props = {
+   onToggleSelect?: (photoId: string) => void;
+ };
+ 
++/** How far one arrow key press moves a zoomed photo, in CSS pixels. */
++const PAN_STEP = 80;
++
+ export default function Lightbox({
+   photos,
+   index,
+@@ -49,6 +54,11 @@ export default function Lightbox({
+ }: Props) {
+   const photo = photos[index];
+   const touchStart = useRef<{ x: number; y: number } | null>(null);
++  /** Set the moment a second finger lands, so a pinch can't end as a swipe. */
++  const multiTouch = useRef(false);
++  const zoom = useRef<ZoomHandle | null>(null);
++  const [zoomed, setZoomed] = useState(false);
++  const [shareNote, setShareNote] = useState<string | null>(null);
+   const [showMeta, setShowMeta] = useState(true);
+   const [showComments, setShowComments] = useState(false);
+   const [playbackFailed, setPlaybackFailed] = useState(false);
+@@ -108,9 +118,22 @@ export default function Lightbox({
+       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+         return;
+       }
+-      if (e.key === "Escape") onClose();
+-      else if (e.key === "ArrowRight") go(1);
+-      else if (e.key === "ArrowLeft") go(-1);
++      // Escape backs out one level at a time: a zoomed photo returns to fitting
++      // the screen before the viewer closes, so a stray keypress can't lose
++      // both the magnification and the place in the gallery at once.
++      if (e.key === "Escape") {
++        if (zoomed) zoom.current?.reset();
++        else onClose();
++      }
++      // While zoomed the arrows move around the photo, which is the thing
++      // actually being read; unzoomed they move between photos.
++      else if (e.key === "ArrowRight") zoomed ? zoom.current?.panBy(-PAN_STEP, 0) : go(1);
++      else if (e.key === "ArrowLeft") zoomed ? zoom.current?.panBy(PAN_STEP, 0) : go(-1);
++      else if (e.key === "ArrowDown" && zoomed) zoom.current?.panBy(0, -PAN_STEP);
++      else if (e.key === "ArrowUp" && zoomed) zoom.current?.panBy(0, PAN_STEP);
++      else if (e.key === "+" || e.key === "=") zoom.current?.zoomBy(1.4);
++      else if (e.key === "-" || e.key === "_") zoom.current?.zoomBy(1 / 1.4);
++      else if (e.key === "0") zoom.current?.reset();
+       else if (e.key === "i") setShowMeta((v) => !v);
+       else if (e.key === "s") toggleSelect();
+       else if (e.key === "f") void toggleFavorite(); // no-ops for a guest
+@@ -123,7 +146,7 @@ export default function Lightbox({
+       window.removeEventListener("keydown", onKey);
+       document.body.style.overflow = prev;
+     };
+-  }, [go, onClose, toggleSelect, toggleFavorite]);
++  }, [go, onClose, toggleSelect, toggleFavorite, zoomed]);
+ 
+   // Warm the neighbours so arrowing through feels instant.
+   useEffect(() => {
+@@ -143,6 +166,8 @@ export default function Lightbox({
+     setCommentCount(null);
+     setPlaybackFailed(false);
+     setConfirmDelete(false);
++    // "Link copied" refers to a photo, so it can't outlive the one on screen.
++    setShareNote(null);
+     // An open editor must not carry a half-typed date onto the next photo.
+     setEditingTime(false);
+     setSavingTime(false);
+@@ -205,6 +230,17 @@ export default function Lightbox({
+     }
+   }
+ 
++  /**
++   * Copies (or hands to the share sheet) a link that reopens this exact photo.
++   * Always points at Browse, even from the map viewer — see lib/photo-link.
++   */
++  async function share() {
++    const result = await sharePhotoLink(photo.id, photo.caption ?? `Foto by ${photo.ownerName}`);
++    if (result === "shared") return; // the sheet already said so
++    setShareNote(result === "copied" ? "Link copied" : "Couldn't copy the link");
++    window.setTimeout(() => setShareNote(null), 2200);
++  }
++
+   function startEditingTime() {
+     setTimeDraft(toDateTimeLocal(photo.takenAt));
+     setTimeError(null);
+@@ -229,11 +265,33 @@ export default function Lightbox({
+         </button>
+ 
+         <div className="min-w-0 flex-1">
+-          <p className="coord">
+-            {index + 1} / {photos.length}
++          <p className="coord truncate">
++            {shareNote ?? `${index + 1} / ${photos.length}`}
+           </p>
+         </div>
+ 
++        {/* A pointer has no pinch, so the gesture needs a button behind it.
++            Hidden for video, which zooms with its own controls or not at all. */}
++        {photo.mediaType !== "video" && (
++          <button
++            type="button"
++            className="icon-btn"
++            onClick={() => zoom.current?.toggle()}
++            aria-label={zoomed ? "Fit photo to screen" : "Zoom in"}
++            aria-pressed={zoomed}
++            title={zoomed ? "Fit to screen (0)" : "Zoom in (+, or double-tap)"}
++          >
++            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
++              <circle cx="7" cy="7" r="4.4" stroke="currentColor" strokeWidth="1.4" />
++              <path d="M10.4 10.4L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
++              <path d="M5 7h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
++              {!zoomed && (
++                <path d="M7 5v4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
++              )}
++            </svg>
++          </button>
++        )}
++
+         {canWrite && (
+         <button
+           type="button"
+@@ -342,6 +400,26 @@ export default function Lightbox({
+           </button>
+         )}
+ 
++        <button
++          type="button"
++          className="icon-btn"
++          onClick={() => void share()}
++          aria-label="Copy a link to this foto"
++          title="Copy a link to this foto"
++        >
++          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
++            <circle cx="12" cy="3.6" r="1.9" stroke="currentColor" strokeWidth="1.3" />
++            <circle cx="4" cy="8" r="1.9" stroke="currentColor" strokeWidth="1.3" />
++            <circle cx="12" cy="12.4" r="1.9" stroke="currentColor" strokeWidth="1.3" />
++            <path
++              d="M5.7 7.1l4.6-2.6M5.7 8.9l4.6 2.6"
++              stroke="currentColor"
++              strokeWidth="1.3"
++              strokeLinecap="round"
++            />
++          </svg>
++        </button>
++
+         <a
+           className="icon-btn"
+           href={photo.downloadUrl}
+@@ -358,18 +436,37 @@ export default function Lightbox({
+       <div
+         className="lightbox-stage relative"
+         onTouchStart={(e) => {
++          // A pinch starts as one finger and becomes two. Measuring the first
++          // against whichever finger happens to lift last is how a pinch used
++          // to end up two photos away — so a second finger voids the gesture
++          // outright rather than being reasoned about at the end.
++          if (e.touches.length > 1) {
++            multiTouch.current = true;
++            touchStart.current = null;
++            return;
++          }
++          multiTouch.current = false;
+           const t = e.touches[0];
+           touchStart.current = { x: t.clientX, y: t.clientY };
+         }}
++        onTouchMove={(e) => {
++          if (e.touches.length > 1) {
++            multiTouch.current = true;
++            touchStart.current = null;
++          }
++        }}
+         onTouchEnd={(e) => {
+           const start = touchStart.current;
+-          if (!start) return;
++          touchStart.current = null;
++          // Fingers still down: this is part of a gesture, not the end of one.
++          if (!start || multiTouch.current || e.touches.length > 0) return;
++          // A zoomed photo owns one-finger drags — that's panning, not paging.
++          if (zoomed) return;
+           const t = e.changedTouches[0];
+           const dx = t.clientX - start.x;
+           const dy = t.clientY - start.y;
+-          // Horizontal intent only, so a vertical scroll or pinch isn't hijacked.
++          // Horizontal intent only, so a vertical drag isn't hijacked.
+           if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.6) go(dx < 0 ? 1 : -1);
+-          touchStart.current = null;
+         }}
+       >
+         {photo.mediaType === "video" ? (
+@@ -403,12 +500,14 @@ export default function Lightbox({
+             />
+           )
+         ) : (
+-          <img
+-            key={photo.id}
++          <ZoomableImage
++            ref={zoom}
++            resetKey={photo.id}
+             src={photo.displayUrl}
+             alt={photo.caption ?? `Photo by ${photo.ownerName}`}
+             width={photo.width}
+             height={photo.height}
++            onZoomChange={setZoomed}
+           />
+         )}
+ 
+diff --git a/src/components/ZoomableImage.tsx b/src/components/ZoomableImage.tsx
+new file mode 100644
+index 0000000..62fabc8
+--- /dev/null
++++ b/src/components/ZoomableImage.tsx
+@@ -0,0 +1,379 @@
++"use client";
++// src/components/ZoomableImage.tsx
++
++import {
++  forwardRef,
++  useCallback,
++  useEffect,
++  useImperativeHandle,
++  useRef,
++  useState,
++} from "react";
++
++/**
++ * A photo you can pinch, drag and double-tap into, with the gesture handled
++ * here rather than by the browser.
++ *
++ * The browser's own pinch zooms the *visual viewport*, which is the wrong thing
++ * to do to a `position: fixed` overlay: the header and footer scale up with the
++ * photo and slide off the edges, and panning fights the fixed positioning. So
++ * the frame takes `touch-action: none` and moves the photo itself with a
++ * transform, which leaves the chrome where it is and keeps the photo inside its
++ * own box.
++ *
++ * The source is the display variant (long edge 2560), not the original — an
++ * original may be HEIC, which most browsers can't decode in an `<img>`.
++ */
++
++export type ZoomHandle = {
++  /** Multiplies the current scale about the middle of the frame. */
++  zoomBy: (factor: number) => void;
++  /** Back to 1x and centred. */
++  reset: () => void;
++  /** Jumps between 1x and a readable zoom. */
++  toggle: () => void;
++  /** Nudges a zoomed photo by a number of CSS pixels. No-op at 1x. */
++  panBy: (dx: number, dy: number) => void;
++};
++
++type Props = {
++  src: string;
++  alt: string;
++  /** Dimensions of `src`, used until the real ones arrive with the decode. */
++  width?: number;
++  height?: number;
++  /** Change this to drop the zoom — pass the photo id. */
++  resetKey: string;
++  /** Fires on the 1x boundary only, not on every frame of a pinch. */
++  onZoomChange?: (zoomed: boolean) => void;
++};
++
++type Transform = { scale: number; x: number; y: number };
++
++const IDENTITY: Transform = { scale: 1, x: 0, y: 0 };
++/** Anything under this counts as "not zoomed", so a stray pixel isn't a state. */
++const ZOOMED_AT = 1.01;
++const TAP_ZOOM = 2.5;
++const DOUBLE_TAP_MS = 300;
++const DOUBLE_TAP_SLOP = 40;
++/** Total finger travel below which a touch is still a tap and not a drag. */
++const TAP_TRAVEL = 12;
++
++const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
++const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
++const mid = (a: Point, b: Point) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
++
++type Point = { x: number; y: number };
++
++const ZoomableImage = forwardRef<ZoomHandle, Props>(function ZoomableImage(
++  { src, alt, width, height, resetKey, onZoomChange },
++  ref,
++) {
++  const frameRef = useRef<HTMLDivElement | null>(null);
++  const imgRef = useRef<HTMLImageElement | null>(null);
++
++  /**
++   * The transform lives in a ref and on the node, not in state: a pinch fires
++   * a move event per frame, and a React render per frame would drop them on a
++   * phone. State holds only the 1x boundary, which changes about twice a
++   * gesture and is what the rest of the viewer actually needs to know.
++   */
++  const tRef = useRef<Transform>(IDENTITY);
++  const [zoomed, setZoomed] = useState(false);
++  const zoomedRef = useRef(false);
++
++  const pointers = useRef(new Map<number, Point>());
++  const pinch = useRef<{ dist: number; mid: Point } | null>(null);
++  const drag = useRef<Point | null>(null);
++  const travel = useRef(0);
++  const lastTap = useRef<{ at: number; x: number; y: number } | null>(null);
++
++  /**
++   * Where the photo actually is. `object-fit: contain` letterboxes it inside a
++   * frame-sized box, so the box is not the picture: panning has to be bounded
++   * by the visible pixels, or a portrait photo would drag away sideways into
++   * its own empty margins.
++   */
++  const fitted = useCallback(() => {
++    const frame = frameRef.current;
++    const img = imgRef.current;
++    if (!frame) return null;
++    const rect = frame.getBoundingClientRect();
++    if (rect.width === 0 || rect.height === 0) return null;
++    const nw = img?.naturalWidth || width || rect.width;
++    const nh = img?.naturalHeight || height || rect.height;
++    const k = Math.min(rect.width / nw, rect.height / nh);
++    return { rect, w: nw * k, h: nh * k };
++  }, [width, height]);
++
++  /**
++   * How far in is worth going. Past roughly 1.5x the source pixels a photo is
++   * only bigger, not clearer, so the ceiling follows the image rather than
++   * being a flat number — but never below 3x, or a small photo couldn't be
++   * inspected at all.
++   */
++  const maxScale = useCallback(() => {
++    const f = fitted();
++    const natural = imgRef.current?.naturalWidth ?? width ?? 0;
++    if (!f || !natural) return 4;
++    return clamp((natural / f.w) * 1.5, 3, 8);
++  }, [fitted, width]);
++
++  const bounded = useCallback(
++    (next: Transform, f: NonNullable<ReturnType<typeof fitted>>): Transform => {
++      const maxX = Math.max(0, (f.w * next.scale - f.rect.width) / 2);
++      const maxY = Math.max(0, (f.h * next.scale - f.rect.height) / 2);
++      return {
++        scale: next.scale,
++        x: clamp(next.x, -maxX, maxX),
++        y: clamp(next.y, -maxY, maxY),
++      };
++    },
++    [],
++  );
++
++  const apply = useCallback(
++    (next: Transform, animate = false) => {
++      tRef.current = next;
++      const img = imgRef.current;
++      if (img) {
++        img.style.transition = animate ? "transform 180ms ease-out" : "none";
++        img.style.transform = `translate3d(${next.x}px, ${next.y}px, 0) scale(${next.scale})`;
++      }
++      const now = next.scale > ZOOMED_AT;
++      if (now !== zoomedRef.current) {
++        zoomedRef.current = now;
++        setZoomed(now);
++      }
++    },
++    [],
++  );
++
++  /**
++   * Scales about a point on the screen, so the bit of the photo under the
++   * fingers (or the cursor) stays under them. Falls back to a clean identity
++   * at the bottom of the range rather than leaving a photo at 1.001x nudged a
++   * few pixels off centre.
++   */
++  const zoomAbout = useCallback(
++    (target: number, px: number, py: number, animate = false) => {
++      const f = fitted();
++      if (!f) return;
++      const cur = tRef.current;
++      const scale = clamp(target, 1, maxScale());
++      if (scale <= ZOOMED_AT) {
++        apply(IDENTITY, animate);
++        return;
++      }
++      const k = scale / cur.scale;
++      const cx = f.rect.left + f.rect.width / 2;
++      const cy = f.rect.top + f.rect.height / 2;
++      const ux = px - cx;
++      const uy = py - cy;
++      apply(
++        bounded({ scale, x: ux - (ux - cur.x) * k, y: uy - (uy - cur.y) * k }, f),
++        animate,
++      );
++    },
++    [fitted, maxScale, apply, bounded],
++  );
++
++  const zoomAboutCentre = useCallback(
++    (target: number, animate = true) => {
++      const f = fitted();
++      if (!f) return;
++      zoomAbout(target, f.rect.left + f.rect.width / 2, f.rect.top + f.rect.height / 2, animate);
++    },
++    [fitted, zoomAbout],
++  );
++
++  useImperativeHandle(
++    ref,
++    (): ZoomHandle => ({
++      zoomBy: (factor) => zoomAboutCentre(tRef.current.scale * factor),
++      reset: () => apply(IDENTITY, true),
++      toggle: () => zoomAboutCentre(tRef.current.scale > ZOOMED_AT ? 1 : TAP_ZOOM),
++      panBy: (dx, dy) => {
++        if (tRef.current.scale <= ZOOMED_AT) return;
++        const f = fitted();
++        if (!f) return;
++        apply(
++          bounded({ ...tRef.current, x: tRef.current.x + dx, y: tRef.current.y + dy }, f),
++          true,
++        );
++      },
++    }),
++    [zoomAboutCentre, apply, fitted, bounded],
++  );
++
++  // A new photo starts unzoomed. Also runs on mount, which is what re-applies
++  // the transform to a freshly keyed <img> after React swaps the node.
++  useEffect(() => {
++    pointers.current.clear();
++    pinch.current = null;
++    drag.current = null;
++    lastTap.current = null;
++    apply(IDENTITY);
++  }, [resetKey, apply]);
++
++  useEffect(() => {
++    onZoomChange?.(zoomed);
++  }, [zoomed, onZoomChange]);
++
++  // Rotating the phone changes the frame, and with it how far the photo is
++  // allowed to be off centre. Re-bound rather than leaving it stranded.
++  useEffect(() => {
++    function onResize() {
++      const f = fitted();
++      if (!f) return;
++      apply(tRef.current.scale <= ZOOMED_AT ? IDENTITY : bounded(tRef.current, f));
++    }
++    window.addEventListener("resize", onResize);
++    window.addEventListener("orientationchange", onResize);
++    return () => {
++      window.removeEventListener("resize", onResize);
++      window.removeEventListener("orientationchange", onResize);
++    };
++  }, [fitted, apply, bounded]);
++
++  // Wheel has to be a native non-passive listener; React's onWheel is passive,
++  // so preventDefault there is ignored and the page scrolls behind the viewer.
++  useEffect(() => {
++    const el = frameRef.current;
++    if (!el) return;
++    function onWheel(e: WheelEvent) {
++      e.preventDefault();
++      // A trackpad pinch arrives as ctrl+wheel with small deltas; a mouse wheel
++      // arrives in coarse notches. Same gesture here, different sensitivity.
++      const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002));
++      zoomAbout(tRef.current.scale * factor, e.clientX, e.clientY);
++    }
++    el.addEventListener("wheel", onWheel, { passive: false });
++    return () => el.removeEventListener("wheel", onWheel);
++  }, [zoomAbout]);
++
++  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
++    if (e.pointerType === "mouse" && e.button !== 0) return;
++    e.currentTarget.setPointerCapture(e.pointerId);
++    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
++    travel.current = 0;
++
++    if (pointers.current.size === 2) {
++      const [a, b] = [...pointers.current.values()];
++      pinch.current = { dist: dist(a, b), mid: mid(a, b) };
++      drag.current = null;
++    } else if (pointers.current.size === 1) {
++      drag.current = { x: e.clientX, y: e.clientY };
++    }
++  }
++
++  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
++    if (!pointers.current.has(e.pointerId)) return;
++    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
++
++    if (pointers.current.size >= 2 && pinch.current) {
++      const [a, b] = [...pointers.current.values()];
++      const d = dist(a, b);
++      const m = mid(a, b);
++      const f = fitted();
++      if (f && pinch.current.dist > 0) {
++        const cur = tRef.current;
++        const scale = clamp(cur.scale * (d / pinch.current.dist), 1, maxScale());
++        const k = scale / cur.scale;
++        const cx = f.rect.left + f.rect.width / 2;
++        const cy = f.rect.top + f.rect.height / 2;
++        // Anchored on the midpoint between the fingers, and following it, so
++        // the pinch zooms and drags in one movement the way a map does.
++        const ux = pinch.current.mid.x - cx;
++        const uy = pinch.current.mid.y - cy;
++        apply(
++          bounded(
++            { scale, x: m.x - cx - (ux - cur.x) * k, y: m.y - cy - (uy - cur.y) * k },
++            f,
++          ),
++        );
++      }
++      pinch.current = { dist: d, mid: m };
++      travel.current = Infinity; // a pinch is never a tap
++      return;
++    }
++
++    if (!drag.current) return;
++    const dx = e.clientX - drag.current.x;
++    const dy = e.clientY - drag.current.y;
++    travel.current += Math.abs(dx) + Math.abs(dy);
++    drag.current = { x: e.clientX, y: e.clientY };
++
++    // One finger on a photo at 1x is a swipe between photos, which belongs to
++    // the viewer. Only take it once there's something to pan.
++    if (tRef.current.scale <= ZOOMED_AT) return;
++    const f = fitted();
++    if (!f) return;
++    apply(bounded({ ...tRef.current, x: tRef.current.x + dx, y: tRef.current.y + dy }, f));
++  }
++
++  function endPointer(e: React.PointerEvent<HTMLDivElement>) {
++    pointers.current.delete(e.pointerId);
++    if (pointers.current.size < 2) pinch.current = null;
++
++    if (pointers.current.size === 1) {
++      // Lifting one finger of a pinch: re-anchor on the one still down, or the
++      // photo jumps by the distance between them.
++      const [only] = [...pointers.current.values()];
++      drag.current = { x: only.x, y: only.y };
++      return;
++    }
++    if (pointers.current.size > 1) return;
++
++    drag.current = null;
++
++    if (e.type === "pointerup" && travel.current < TAP_TRAVEL) {
++      const now = performance.now();
++      const prev = lastTap.current;
++      const near =
++        prev && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_SLOP;
++      if (prev && near && now - prev.at < DOUBLE_TAP_MS) {
++        lastTap.current = null;
++        zoomAbout(tRef.current.scale > ZOOMED_AT ? 1 : TAP_ZOOM, e.clientX, e.clientY, true);
++        return;
++      }
++      lastTap.current = { at: now, x: e.clientX, y: e.clientY };
++    }
++
++    // Settle: a photo pinched back down to 1x returns to the middle.
++    if (tRef.current.scale <= ZOOMED_AT && (tRef.current.x !== 0 || tRef.current.y !== 0)) {
++      apply(IDENTITY, true);
++    }
++  }
++
++  return (
++    <div
++      ref={frameRef}
++      className="zoom-frame"
++      data-zoomed={zoomed || undefined}
++      onPointerDown={onPointerDown}
++      onPointerMove={onPointerMove}
++      onPointerUp={endPointer}
++      onPointerCancel={endPointer}
++      // The browser's picture-drag would otherwise start mid-pan on desktop.
++      onDragStart={(e) => e.preventDefault()}
++    >
++      <img
++        key={resetKey}
++        ref={imgRef}
++        src={src}
++        alt={alt}
++        width={width}
++        height={height}
++        draggable={false}
++        // Bounds are guesswork until the real dimensions are known.
++        onLoad={() => {
++          const f = fitted();
++          if (f) apply(bounded(tRef.current, f));
++        }}
++      />
++    </div>
++  );
++});
++
++export default ZoomableImage;
+diff --git a/src/lib/photo-link.ts b/src/lib/photo-link.ts
+new file mode 100644
+index 0000000..57d7915
+--- /dev/null
++++ b/src/lib/photo-link.ts
+@@ -0,0 +1,51 @@
++// src/lib/photo-link.ts
++
++/**
++ * A link to one photo: `/browse?image_id=abc123`.
++ *
++ * Browse is the target rather than the map because it holds every photo
++ * whether or not it has been placed, and it can open the viewer on one without
++ * first having to reason about pins and clusters. A link from the map viewer
++ * therefore points at Browse too — the point of a shared link is that the photo
++ * opens, not that the sender's page is reproduced.
++ */
++
++export const IMAGE_PARAM = "image_id";
++
++/** Absolute, because these are made to be pasted into a chat. */
++export function photoLink(photoId: string, origin?: string): string {
++  const base = origin ?? (typeof window === "undefined" ? "" : window.location.origin);
++  return `${base}/browse?${IMAGE_PARAM}=${encodeURIComponent(photoId)}`;
++}
++
++export type ShareResult = "shared" | "copied" | "failed";
++
++/**
++ * Hands the link to whatever the device has. The share sheet is the right
++ * thing on a phone, where the point is usually to send it to someone; the
++ * clipboard is the fallback everywhere else.
++ *
++ * A cancelled share sheet reports "shared": the person saw their options and
++ * chose none of them, which is not a failure to tell them about.
++ */
++export async function sharePhotoLink(photoId: string, title?: string): Promise<ShareResult> {
++  const url = photoLink(photoId);
++
++  if (typeof navigator !== "undefined" && navigator.share) {
++    try {
++      await navigator.share({ url, title: title ?? "Spain Fotos" });
++      return "shared";
++    } catch (err) {
++      if (err instanceof Error && err.name === "AbortError") return "shared";
++      // Anything else — a share sheet that refused the payload, a browser that
++      // advertises the API without a target — falls through to the clipboard.
++    }
++  }
++
++  try {
++    await navigator.clipboard.writeText(url);
++    return "copied";
++  } catch {
++    return "failed";
++  }
++}
+diff --git a/src/proxy.ts b/src/proxy.ts
+index 04e34e9..23269a7 100644
+--- a/src/proxy.ts
++++ b/src/proxy.ts
+@@ -42,9 +42,14 @@ export async function proxy(req: NextRequest) {
+   if (pathname.startsWith("/api/")) {
+     return NextResponse.json({ error: "Sign in to continue" }, { status: 401 });
+   }
++  // The query string comes along. A shared `/browse?image_id=…` handed to
++  // someone who isn't signed in used to arrive at the gallery with the photo
++  // stripped off it, which is the one case the link existed for.
++  const next = pathname + req.nextUrl.search;
+   const url = req.nextUrl.clone();
+   url.pathname = "/login";
+-  url.searchParams.set("next", pathname);
++  url.search = ""; // drop the original params; they're inside `next` now
++  url.searchParams.set("next", next);
+   return NextResponse.redirect(url);
+ }
