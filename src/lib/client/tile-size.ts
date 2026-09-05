@@ -4,39 +4,27 @@
 import { useCallback, useEffect, useState } from "react";
 
 /**
- * Thumbnail size is stored as a *target tile width* rather than a column count.
+ * How many steps the −/+ control offers.
  *
- * One number then means the same thing everywhere: the grid is
- * `repeat(auto-fill, minmax(size, 1fr))` and the number of columns falls out of
- * whatever width is going. A column count would have to mean something
- * different on a phone and a desktop, and the map panel — which the user can
- * now drag wider — has no fixed width to count against at all.
- *
- * The scale stops at 256. Uploads generate a 512px thumbnail (THUMB_MAX in
- * lib/client/prepare.ts), so 256 CSS pixels is exactly one thumbnail on a 2x
- * display: the point past which bigger tiles would mean pulling the 2560px
- * display variant for every tile in the grid.
+ * This is the one number that has to agree with the stylesheet: the control
+ * puts `size-1` … `size-{STEP_COUNT}` on the grid, and globals.css decides what
+ * each of those means. Add a `.size-6` rule there and bump this, and the extra
+ * step appears. Nothing here knows or cares how big a thumbnail is.
  */
-export const TILE_STEPS = [88, 116, 152, 200, 256];
-
-const LAST_STEP = TILE_STEPS.length - 1;
+export const STEP_COUNT = 5;
 
 const STORAGE_PREFIX = "cala:tile-size:";
 
-/**
- * Under this the viewport is a phone, where the wide default would land on two
- * columns. Only used before anyone has expressed a preference — once they have,
- * their number wins at every width.
- */
+/** Under this the viewport is a phone, where a grid may want a different start. */
 const NARROW = 640;
 
 function clampStep(n: number): number {
-  return Math.min(LAST_STEP, Math.max(0, n));
+  return Math.min(STEP_COUNT - 1, Math.max(0, n));
 }
 
 export type TileSize = {
-  /** Target tile width in CSS pixels, for `minmax()`. */
-  size: number;
+  /** `size-1` … `size-N`, for the grid container. Style it in globals.css. */
+  sizeClass: string;
   step: number;
   stepCount: number;
   canGrow: boolean;
@@ -49,31 +37,34 @@ export type TileSize = {
  * A remembered thumbnail size for one grid, per device.
  *
  * `surface` keys the storage, so the gallery and the map panel keep separate
- * numbers — they're different widths and the same tile size doesn't suit both.
+ * numbers — they're very different widths and one setting doesn't suit both.
  *
- * The stored value is read in an effect rather than during render: this is a
- * client component that still gets server-rendered, and reading localStorage
- * on the way past would make the markup disagree with itself on hydration.
- * Nothing is visible in that gap anyway — the grids are all waiting on
- * /api/photos, which resolves later than this does.
+ * The stored value is read in an effect rather than during render: these are
+ * client components that still get server-rendered, and reading localStorage on
+ * the way past would make the markup disagree with itself on hydration. Nothing
+ * is visible in that gap anyway — the grids are all waiting on /api/photos,
+ * which resolves later than this does.
  */
-export function useTileSize(surface: string, wideDefault: number): TileSize {
+export function useTileSize(
+  surface: string,
+  { defaultStep, narrowDefaultStep = defaultStep }: { defaultStep: number; narrowDefaultStep?: number },
+): TileSize {
   const key = STORAGE_PREFIX + surface;
-  const [step, setStep] = useState(wideDefault);
+  const [step, setStep] = useState(defaultStep);
 
   useEffect(() => {
-    let start = window.innerWidth < NARROW ? Math.min(wideDefault, 1) : wideDefault;
+    let start = window.innerWidth < NARROW ? narrowDefaultStep : defaultStep;
     try {
       const saved = localStorage.getItem(key);
       if (saved !== null) {
         const n = Number.parseInt(saved, 10);
-        if (Number.isFinite(n)) start = clampStep(n);
+        if (Number.isFinite(n)) start = n;
       }
     } catch {
       // Private mode, or storage switched off. The default is a fine answer.
     }
     setStep(clampStep(start));
-  }, [key, wideDefault]);
+  }, [key, defaultStep, narrowDefaultStep]);
 
   const nudge = useCallback(
     (delta: number) => {
@@ -94,23 +85,12 @@ export function useTileSize(surface: string, wideDefault: number): TileSize {
   const shrink = useCallback(() => nudge(-1), [nudge]);
 
   return {
-    size: TILE_STEPS[step],
+    sizeClass: `size-${step + 1}`,
     step,
-    stepCount: TILE_STEPS.length,
-    canGrow: step < LAST_STEP,
+    stepCount: STEP_COUNT,
+    canGrow: step < STEP_COUNT - 1,
     canShrink: step > 0,
     grow,
     shrink,
   };
-}
-
-/**
- * The `grid-template-columns` for a tile size.
- *
- * `min(size, 100%)` rather than a bare `size`: a container narrower than one
- * tile — the map panel dragged in, a small phone at the top of the scale —
- * would otherwise lay out a column wider than itself and spill sideways.
- */
-export function tileColumns(size: number): string {
-  return `repeat(auto-fill, minmax(min(${size}px, 100%), 1fr))`;
 }

@@ -1,0 +1,100 @@
+From dac1d84889892e731e936ad4663fb370cd0b46d0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 5 Sep 2026 19:36:26 +0000
+Subject: [PATCH] Fix the map panel's flattened tiles and crowded header
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The tiles weren't square. The panel's grid is a flex child of a
+`max-h-[72vh]` section, so it has a definite height, and grid's default
+`align-content: stretch` divides that height evenly across auto rows —
+`aspect-square` loses and every tile becomes panelHeight/count. The old
+`gridAutoRows: minmax(100px, 250px)` had been hiding this, since a
+minmax track isn't auto and never stretches; removing it in the last
+commit exposed it. `content-start` lets the rows take their square
+height and the container scroll, which is what it was already set up to
+do. The gallery grid doesn't hit this because its height is
+unconstrained.
+
+The header now runs two rows. A title, a coordinate, a size control and
+a close button on one line is more than a phone-width bottom sheet has,
+and the coordinate was the thing that gave, truncating to "BA…". Close
+keeps the top-right corner; the size control takes the second line,
+alongside the coordinate that wasn't filling it.
+---
+ src/components/PhotoPanel.tsx | 44 ++++++++++++++++++++++++-----------
+ 1 file changed, 30 insertions(+), 14 deletions(-)
+
+diff --git a/src/components/PhotoPanel.tsx b/src/components/PhotoPanel.tsx
+index 5805daa..5504718 100644
+--- a/src/components/PhotoPanel.tsx
++++ b/src/components/PhotoPanel.tsx
+@@ -169,26 +169,42 @@ export default function PhotoPanel({
+         />
+       </div>
+ 
+-      <header className="flex items-start gap-3 border-b border-hairline px-4 py-3">
+-        <div className="min-w-0 flex-1">
+-          <p className="eyebrow">{title ?? "This spot"}</p>
+-          <p className="mt-1 font-display text-lg font-semibold leading-tight">
+-            {photos.length} {photos.length === 1 ? "photo" : "photos"}
+-          </p>
+-          <p className="coord mt-1 truncate">
++      {/*
++       * Two rows rather than one. The panel is a phone-width bottom sheet as
++       * often as it's a desktop side panel, and a title, a coordinate, a size
++       * control and a close button competing for one line left the coordinate
++       * reading "BA…". Close stays top-right where it's expected; the size
++       * control takes the second line, which the coordinate wasn't filling.
++       */}
++      <header className="border-b border-hairline px-4 py-3">
++        <div className="flex items-start gap-3">
++          <div className="min-w-0 flex-1">
++            <p className="eyebrow">{title ?? "This spot"}</p>
++            <p className="mt-1 font-display text-lg font-semibold leading-tight">
++              {photos.length} {photos.length === 1 ? "photo" : "photos"}
++            </p>
++          </div>
++          <button
++            type="button"
++            className="icon-btn shrink-0"
++            onClick={onClose}
++            aria-label="Close"
++          >
++            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
++              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" />
++            </svg>
++          </button>
++        </div>
++        <div className="mt-2 flex items-center gap-3">
++          <p className="coord min-w-0 flex-1 truncate">
+             {centre?.lat !== undefined && centre?.lat !== null && centre.lng !== null
+               ? `${centre.lat.toFixed(4)}, ${centre.lng.toFixed(4)}  ·  `
+               : ""}
+             {contributors.slice(0, 3).join(", ")}
+             {contributors.length > 3 && ` +${contributors.length - 3}`}
+           </p>
++          <TileSizeControl tile={tile} className="shrink-0" />
+         </div>
+-        <TileSizeControl tile={tile} className="shrink-0" />
+-        <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+-            <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" />
+-          </svg>
+-        </button>
+       </header>
+ 
+       <div
+@@ -196,7 +212,7 @@ export default function PhotoPanel({
+         onScroll={(e) => {
+           if (scrollTop) scrollTop.current = e.currentTarget.scrollTop;
+         }}
+-        className="scroll-slim grid gap-1 overflow-y-scroll p-1"
++        className="scroll-slim grid content-start gap-1 overflow-y-scroll p-1"
+         style={{ gridTemplateColumns: tileColumns(tile.size) }}
+       >
+         {photos.map((photo, i) => (
+-- 
+2.43.0
+

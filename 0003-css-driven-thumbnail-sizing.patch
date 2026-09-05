@@ -1,0 +1,337 @@
+From ce7d43383ffa19be2c070b2e21a754ee854c666e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 5 Sep 2026 21:24:23 +0000
+Subject: [PATCH] Move thumbnail sizing out of JS and into globals.css
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The control now sets one class on the grid container and nothing else:
+size-1 … size-5. No inline grid-template-columns, no pixel values in the
+component, no computed style attribute. Everything about how big a
+thumbnail is lives in one commented block in globals.css.
+
+Two modifiers, because the two grids have nothing in common but the
+control. .photo-grid--page is the gallery, sized by target tile width so
+the column count falls out of the space available between a phone and
+max-w-5xl. .photo-grid--panel is the map panel, sized by explicit column
+count — its width ranges from a phone-width sheet to an 880px side panel,
+and counting columns is the only way every press of + changes something
+at the narrow end. Tile aspect ratio moves there too, as .photo-tile.
+
+The align-content: start that stops the panel flattening its rows is now
+a documented line in that block rather than a utility class buried in a
+component.
+
+STEP_COUNT in tile-size.ts is the only thing that still has to agree with
+the stylesheet, and it's commented as such.
+---
+ src/app/(app)/browse/page.tsx | 15 +++----
+ src/app/globals.css           | 73 ++++++++++++++++++++++++++++++++++
+ src/components/PhotoPanel.tsx | 10 ++---
+ src/lib/client/tile-size.ts   | 74 +++++++++++++----------------------
+ 4 files changed, 113 insertions(+), 59 deletions(-)
+
+diff --git a/src/app/(app)/browse/page.tsx b/src/app/(app)/browse/page.tsx
+index 3f5dcd8..35b1f9e 100644
+--- a/src/app/(app)/browse/page.tsx
++++ b/src/app/(app)/browse/page.tsx
+@@ -17,7 +17,7 @@ import { IMAGE_PARAM } from "@/lib/photo-link";
+ import { writeLocation } from "@/lib/client/place-photos";
+ import { deletePhotos } from "@/lib/client/delete-photos";
+ import { formatDuration } from "@/lib/client/video";
+-import { tileColumns, useTileSize } from "@/lib/client/tile-size";
++import { useTileSize } from "@/lib/client/tile-size";
+ import TileSizeControl from "@/components/TileSizeControl";
+ import type { ReactionKind } from "@/db/schema";
+ import type { PersonDTO, PhotoDTO } from "@/types";
+@@ -114,10 +114,11 @@ export default function BrowsePage() {
+   const [owner, setOwner] = useState<string | null>(null); // null = everyone
+   const [mark, setMark] = useState<Mark>({ kind: "any" });
+   const [index, setIndex] = useState<number | null>(null);
+-  // Step 2 of the scale is six columns at this page's max-w-5xl, which is what
+-  // the fixed `md:grid-cols-6` used to give — so nobody's gallery changes shape
+-  // until they ask it to.
+-  const tile = useTileSize("browse", 2);
++  // Steps 3 and 2 are six columns at this page's max-w-5xl and three on a
++  // phone, which is what the fixed `md:grid-cols-6` / `grid-cols-3` used to
++  // give — so nobody's gallery changes shape until they ask it to. What each
++  // step actually means is in globals.css.
++  const tile = useTileSize("browse", { defaultStep: 2, narrowDefaultStep: 1 });
+ 
+   // Multi-select
+   const [selectMode, setSelectMode] = useState(false);
+@@ -758,7 +759,7 @@ export default function BrowsePage() {
+               </button>
+             )}
+           </h2>
+-          <div className="grid gap-1" style={{ gridTemplateColumns: tileColumns(tile.size) }}>
++          <div className={`photo-grid photo-grid--page ${tile.sizeClass}`}>
+             {items.map((photo) => {
+               const isSelected = selected.has(photo.id);
+               return (
+@@ -776,7 +777,7 @@ export default function BrowsePage() {
+                   }
+                   aria-pressed={selectMode ? isSelected : undefined}
+                   className={
+-                    "group relative aspect-square overflow-hidden rounded-[2px] bg-hull-hi" +
++                    "photo-tile group relative overflow-hidden rounded-[2px] bg-hull-hi" +
+                     (selectMode && isSelected
+                       ? " ring-2 ring-foam ring-offset-1 ring-offset-deep"
+                       : "")
+diff --git a/src/app/globals.css b/src/app/globals.css
+index c629ad4..0b33f7d 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -715,6 +715,79 @@ body {
+   background: var(--color-hull);
+ }
+ 
++/* ── Photo grid sizing ───────────────────────────────────────────────────────
++ *
++ * The −/+ control puts one of `size-1` … `size-5` on the grid container and
++ * nothing else. Every decision about how big a thumbnail is lives in this
++ * block. React sets the class; the numbers are yours.
++ *
++ * Two grids, two modifiers, because they're very different widths:
++ *
++ *   .photo-grid--page    the gallery on /browse, capped at max-w-5xl but as
++ *                        narrow as a phone. Sized by target tile width, so the
++ *                        column count falls out of whatever space there is.
++ *
++ *   .photo-grid--panel   the map panel: a bottom sheet on a phone, a side panel
++ *                        from 300px to 880px on a desktop. Sized by explicit
++ *                        column count, so every press of + changes something
++ *                        even when the panel is narrow.
++ *
++ * They each remember their own step, so changing one doesn't disturb the other.
++ * To add a sixth step, add the rules and bump STEP_COUNT in
++ * src/lib/client/tile-size.ts.
++ */
++
++.photo-grid {
++  display: grid;
++  gap: 4px;
++}
++
++/* Not optional for the map panel. Its grid is a flex child of a max-height
++   section, so it has a definite height, and the default `align-content:
++   stretch` would divide that height evenly across the rows — flattening the
++   square tiles into bands however tall the panel happens to be. */
++.photo-grid--panel {
++  align-content: start;
++}
++
++.photo-tile {
++  aspect-ratio: 1 / 1;
++}
++
++/* `min(…, 100%)` so a container narrower than one tile lays out a single
++   column instead of spilling sideways. */
++.photo-grid--page.size-1 {
++  grid-template-columns: repeat(auto-fill, minmax(min(88px, 100%), 1fr));
++}
++.photo-grid--page.size-2 {
++  grid-template-columns: repeat(auto-fill, minmax(min(116px, 100%), 1fr));
++}
++.photo-grid--page.size-3 {
++  grid-template-columns: repeat(auto-fill, minmax(min(152px, 100%), 1fr));
++}
++.photo-grid--page.size-4 {
++  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
++}
++.photo-grid--page.size-5 {
++  grid-template-columns: repeat(auto-fill, minmax(min(256px, 100%), 1fr));
++}
++
++.photo-grid--panel.size-1 {
++  grid-template-columns: repeat(5, minmax(0, 1fr));
++}
++.photo-grid--panel.size-2 {
++  grid-template-columns: repeat(4, minmax(0, 1fr));
++}
++.photo-grid--panel.size-3 {
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++}
++.photo-grid--panel.size-4 {
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++}
++.photo-grid--panel.size-5 {
++  grid-template-columns: repeat(1, minmax(0, 1fr));
++}
++
+ .scroll-slim::-webkit-scrollbar {
+   width: 8px;
+   height: 8px;
+diff --git a/src/components/PhotoPanel.tsx b/src/components/PhotoPanel.tsx
+index 5504718..61ad9bf 100644
+--- a/src/components/PhotoPanel.tsx
++++ b/src/components/PhotoPanel.tsx
+@@ -6,7 +6,7 @@ import type { PhotoDTO } from "@/types";
+ import Avatar from "./Avatar";
+ import { REACTIONS } from "./ReactionBar";
+ import TileSizeControl from "./TileSizeControl";
+-import { tileColumns, useTileSize } from "@/lib/client/tile-size";
++import { useTileSize } from "@/lib/client/tile-size";
+ 
+ /** Width of the side panel before anyone drags it, matching the old fixed one. */
+ const DEFAULT_WIDTH = 400;
+@@ -57,7 +57,8 @@ export default function PhotoPanel({
+    */
+   focusId?: React.RefObject<string | null>;
+ }) {
+-  const tile = useTileSize("panel", 1);
++  // Step 3 is three columns, the panel's original `grid-cols-3`.
++  const tile = useTileSize("panel", { defaultStep: 2 });
+   const scroller = useRef<HTMLDivElement | null>(null);
+   const tiles = useRef(new Map<string, HTMLElement>());
+ 
+@@ -212,8 +213,7 @@ export default function PhotoPanel({
+         onScroll={(e) => {
+           if (scrollTop) scrollTop.current = e.currentTarget.scrollTop;
+         }}
+-        className="scroll-slim grid content-start gap-1 overflow-y-scroll p-1"
+-        style={{ gridTemplateColumns: tileColumns(tile.size) }}
++        className={`scroll-slim photo-grid photo-grid--panel overflow-y-scroll p-1 ${tile.sizeClass}`}
+       >
+         {photos.map((photo, i) => (
+           <button
+@@ -224,7 +224,7 @@ export default function PhotoPanel({
+             }}
+             type="button"
+             onClick={() => onSelect(i)}
+-            className="group relative aspect-square overflow-hidden rounded-[2px] bg-hull-hi"
++            className="photo-tile group relative overflow-hidden rounded-[2px] bg-hull-hi"
+             aria-label={`Open photo by ${photo.ownerName}`}
+           >
+             <img
+diff --git a/src/lib/client/tile-size.ts b/src/lib/client/tile-size.ts
+index 2f9b0a5..d641d3f 100644
+--- a/src/lib/client/tile-size.ts
++++ b/src/lib/client/tile-size.ts
+@@ -4,39 +4,27 @@
+ import { useCallback, useEffect, useState } from "react";
+ 
+ /**
+- * Thumbnail size is stored as a *target tile width* rather than a column count.
++ * How many steps the −/+ control offers.
+  *
+- * One number then means the same thing everywhere: the grid is
+- * `repeat(auto-fill, minmax(size, 1fr))` and the number of columns falls out of
+- * whatever width is going. A column count would have to mean something
+- * different on a phone and a desktop, and the map panel — which the user can
+- * now drag wider — has no fixed width to count against at all.
+- *
+- * The scale stops at 256. Uploads generate a 512px thumbnail (THUMB_MAX in
+- * lib/client/prepare.ts), so 256 CSS pixels is exactly one thumbnail on a 2x
+- * display: the point past which bigger tiles would mean pulling the 2560px
+- * display variant for every tile in the grid.
++ * This is the one number that has to agree with the stylesheet: the control
++ * puts `size-1` … `size-{STEP_COUNT}` on the grid, and globals.css decides what
++ * each of those means. Add a `.size-6` rule there and bump this, and the extra
++ * step appears. Nothing here knows or cares how big a thumbnail is.
+  */
+-export const TILE_STEPS = [88, 116, 152, 200, 256];
+-
+-const LAST_STEP = TILE_STEPS.length - 1;
++export const STEP_COUNT = 5;
+ 
+ const STORAGE_PREFIX = "cala:tile-size:";
+ 
+-/**
+- * Under this the viewport is a phone, where the wide default would land on two
+- * columns. Only used before anyone has expressed a preference — once they have,
+- * their number wins at every width.
+- */
++/** Under this the viewport is a phone, where a grid may want a different start. */
+ const NARROW = 640;
+ 
+ function clampStep(n: number): number {
+-  return Math.min(LAST_STEP, Math.max(0, n));
++  return Math.min(STEP_COUNT - 1, Math.max(0, n));
+ }
+ 
+ export type TileSize = {
+-  /** Target tile width in CSS pixels, for `minmax()`. */
+-  size: number;
++  /** `size-1` … `size-N`, for the grid container. Style it in globals.css. */
++  sizeClass: string;
+   step: number;
+   stepCount: number;
+   canGrow: boolean;
+@@ -49,31 +37,34 @@ export type TileSize = {
+  * A remembered thumbnail size for one grid, per device.
+  *
+  * `surface` keys the storage, so the gallery and the map panel keep separate
+- * numbers — they're different widths and the same tile size doesn't suit both.
++ * numbers — they're very different widths and one setting doesn't suit both.
+  *
+- * The stored value is read in an effect rather than during render: this is a
+- * client component that still gets server-rendered, and reading localStorage
+- * on the way past would make the markup disagree with itself on hydration.
+- * Nothing is visible in that gap anyway — the grids are all waiting on
+- * /api/photos, which resolves later than this does.
++ * The stored value is read in an effect rather than during render: these are
++ * client components that still get server-rendered, and reading localStorage on
++ * the way past would make the markup disagree with itself on hydration. Nothing
++ * is visible in that gap anyway — the grids are all waiting on /api/photos,
++ * which resolves later than this does.
+  */
+-export function useTileSize(surface: string, wideDefault: number): TileSize {
++export function useTileSize(
++  surface: string,
++  { defaultStep, narrowDefaultStep = defaultStep }: { defaultStep: number; narrowDefaultStep?: number },
++): TileSize {
+   const key = STORAGE_PREFIX + surface;
+-  const [step, setStep] = useState(wideDefault);
++  const [step, setStep] = useState(defaultStep);
+ 
+   useEffect(() => {
+-    let start = window.innerWidth < NARROW ? Math.min(wideDefault, 1) : wideDefault;
++    let start = window.innerWidth < NARROW ? narrowDefaultStep : defaultStep;
+     try {
+       const saved = localStorage.getItem(key);
+       if (saved !== null) {
+         const n = Number.parseInt(saved, 10);
+-        if (Number.isFinite(n)) start = clampStep(n);
++        if (Number.isFinite(n)) start = n;
+       }
+     } catch {
+       // Private mode, or storage switched off. The default is a fine answer.
+     }
+     setStep(clampStep(start));
+-  }, [key, wideDefault]);
++  }, [key, defaultStep, narrowDefaultStep]);
+ 
+   const nudge = useCallback(
+     (delta: number) => {
+@@ -94,23 +85,12 @@ export function useTileSize(surface: string, wideDefault: number): TileSize {
+   const shrink = useCallback(() => nudge(-1), [nudge]);
+ 
+   return {
+-    size: TILE_STEPS[step],
++    sizeClass: `size-${step + 1}`,
+     step,
+-    stepCount: TILE_STEPS.length,
+-    canGrow: step < LAST_STEP,
++    stepCount: STEP_COUNT,
++    canGrow: step < STEP_COUNT - 1,
+     canShrink: step > 0,
+     grow,
+     shrink,
+   };
+ }
+-
+-/**
+- * The `grid-template-columns` for a tile size.
+- *
+- * `min(size, 100%)` rather than a bare `size`: a container narrower than one
+- * tile — the map panel dragged in, a small phone at the top of the scale —
+- * would otherwise lay out a column wider than itself and spill sideways.
+- */
+-export function tileColumns(size: number): string {
+-  return `repeat(auto-fill, minmax(min(${size}px, 100%), 1fr))`;
+-}
+-- 
+2.43.0
+

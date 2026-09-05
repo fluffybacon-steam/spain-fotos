@@ -6,7 +6,7 @@ import type { PhotoDTO } from "@/types";
 import Avatar from "./Avatar";
 import { REACTIONS } from "./ReactionBar";
 import TileSizeControl from "./TileSizeControl";
-import { tileColumns, useTileSize } from "@/lib/client/tile-size";
+import { useTileSize } from "@/lib/client/tile-size";
 
 /** Width of the side panel before anyone drags it, matching the old fixed one. */
 const DEFAULT_WIDTH = 400;
@@ -57,7 +57,8 @@ export default function PhotoPanel({
    */
   focusId?: React.RefObject<string | null>;
 }) {
-  const tile = useTileSize("panel", 1);
+  // Step 3 is three columns, the panel's original `grid-cols-3`.
+  const tile = useTileSize("panel", { defaultStep: 4 });
   const scroller = useRef<HTMLDivElement | null>(null);
   const tiles = useRef(new Map<string, HTMLElement>());
 
@@ -169,26 +170,42 @@ export default function PhotoPanel({
         />
       </div>
 
-      <header className="flex items-start gap-3 border-b border-hairline px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="eyebrow">{title ?? "This spot"}</p>
-          <p className="mt-1 font-display text-lg font-semibold leading-tight">
-            {photos.length} {photos.length === 1 ? "photo" : "photos"}
-          </p>
-          <p className="coord mt-1 truncate">
+      {/*
+       * Two rows rather than one. The panel is a phone-width bottom sheet as
+       * often as it's a desktop side panel, and a title, a coordinate, a size
+       * control and a close button competing for one line left the coordinate
+       * reading "BA…". Close stays top-right where it's expected; the size
+       * control takes the second line, which the coordinate wasn't filling.
+       */}
+      <header className="border-b border-hairline px-4 py-3">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="eyebrow">{title ?? "This spot"}</p>
+            <p className="mt-1 font-display text-lg font-semibold leading-tight">
+              {photos.length} {photos.length === 1 ? "photo" : "photos"}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="icon-btn shrink-0"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" />
+            </svg>
+          </button>
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          <p className="coord min-w-0 flex-1 truncate">
             {centre?.lat !== undefined && centre?.lat !== null && centre.lng !== null
               ? `${centre.lat.toFixed(4)}, ${centre.lng.toFixed(4)}  ·  `
               : ""}
             {contributors.slice(0, 3).join(", ")}
             {contributors.length > 3 && ` +${contributors.length - 3}`}
           </p>
+          <TileSizeControl tile={tile} className="shrink-0" />
         </div>
-        <TileSizeControl tile={tile} className="shrink-0" />
-        <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" />
-          </svg>
-        </button>
       </header>
 
       <div
@@ -196,8 +213,7 @@ export default function PhotoPanel({
         onScroll={(e) => {
           if (scrollTop) scrollTop.current = e.currentTarget.scrollTop;
         }}
-        className="scroll-slim grid gap-1 overflow-y-scroll p-1"
-        style={{ gridTemplateColumns: tileColumns(tile.size) }}
+        className={`scroll-slim photo-grid photo-grid--panel overflow-y-scroll p-1 ${tile.sizeClass}`}
       >
         {photos.map((photo, i) => (
           <button
@@ -208,7 +224,7 @@ export default function PhotoPanel({
             }}
             type="button"
             onClick={() => onSelect(i)}
-            className="group relative aspect-square overflow-hidden rounded-[2px] bg-hull-hi"
+            className="photo-tile group relative overflow-hidden rounded-[2px] bg-hull-hi"
             aria-label={`Open photo by ${photo.ownerName}`}
           >
             <img

@@ -17,7 +17,7 @@ import { IMAGE_PARAM } from "@/lib/photo-link";
 import { writeLocation } from "@/lib/client/place-photos";
 import { deletePhotos } from "@/lib/client/delete-photos";
 import { formatDuration } from "@/lib/client/video";
-import { tileColumns, useTileSize } from "@/lib/client/tile-size";
+import { useTileSize } from "@/lib/client/tile-size";
 import TileSizeControl from "@/components/TileSizeControl";
 import type { ReactionKind } from "@/db/schema";
 import type { PersonDTO, PhotoDTO } from "@/types";
@@ -114,10 +114,11 @@ export default function BrowsePage() {
   const [owner, setOwner] = useState<string | null>(null); // null = everyone
   const [mark, setMark] = useState<Mark>({ kind: "any" });
   const [index, setIndex] = useState<number | null>(null);
-  // Step 2 of the scale is six columns at this page's max-w-5xl, which is what
-  // the fixed `md:grid-cols-6` used to give — so nobody's gallery changes shape
-  // until they ask it to.
-  const tile = useTileSize("browse", 2);
+  // Steps 3 and 2 are six columns at this page's max-w-5xl and three on a
+  // phone, which is what the fixed `md:grid-cols-6` / `grid-cols-3` used to
+  // give — so nobody's gallery changes shape until they ask it to. What each
+  // step actually means is in globals.css.
+  const tile = useTileSize("browse", { defaultStep: 4, narrowDefaultStep: 1 });
 
   // Multi-select
   const [selectMode, setSelectMode] = useState(false);
@@ -758,7 +759,7 @@ export default function BrowsePage() {
               </button>
             )}
           </h2>
-          <div className="grid gap-1" style={{ gridTemplateColumns: tileColumns(tile.size) }}>
+          <div className={`photo-grid photo-grid--page ${tile.sizeClass}`}>
             {items.map((photo) => {
               const isSelected = selected.has(photo.id);
               return (
@@ -776,7 +777,7 @@ export default function BrowsePage() {
                   }
                   aria-pressed={selectMode ? isSelected : undefined}
                   className={
-                    "group relative aspect-square overflow-hidden rounded-[2px] bg-hull-hi" +
+                    "photo-tile group relative overflow-hidden rounded-[2px] bg-hull-hi" +
                     (selectMode && isSelected
                       ? " ring-2 ring-foam ring-offset-1 ring-offset-deep"
                       : "")

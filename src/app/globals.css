@@ -715,6 +715,45 @@ body {
   background: var(--color-hull);
 }
 
+/* ── Photo grid sizing ───────────────────────────────────────────────────────
+ *
+ * The −/+ control puts one of `size-1` … `size-5` on the grid container and
+ * nothing else. Every decision about how big a thumbnail is lives in this
+ * block. React sets the class; the numbers are yours.
+ *
+ * Two grids, two modifiers, because they're very different widths:
+ *
+ *   .photo-grid--page    the gallery on /browse, capped at max-w-5xl but as
+ *                        narrow as a phone. Sized by target tile width, so the
+ *                        column count falls out of whatever space there is.
+ *
+ *   .photo-grid--panel   the map panel: a bottom sheet on a phone, a side panel
+ *                        from 300px to 880px on a desktop. Sized by explicit
+ *                        column count, so every press of + changes something
+ *                        even when the panel is narrow.
+ *
+ * They each remember their own step, so changing one doesn't disturb the other.
+ * To add a sixth step, add the rules and bump STEP_COUNT in
+ * src/lib/client/tile-size.ts.
+ */
+
+.photo-grid {
+  display: grid;
+  gap: 4px;
+}
+
+/* Not optional for the map panel. Its grid is a flex child of a max-height
+   section, so it has a definite height, and the default `align-content:
+   stretch` would divide that height evenly across the rows — flattening the
+   square tiles into bands however tall the panel happens to be. */
+.photo-grid--panel {
+  align-content: start;
+}
+
+.photo-tile {
+  aspect-ratio: 1 / 1;
+}
+
 .scroll-slim::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -936,4 +975,30 @@ li[data-stage="duplicate"] {
   to {
     scale: 1.25
   }
+}
+
+/* size for foto panels */
+.photo-grid{
+  width:100%;
+  height: auto;
+  grid-auto-rows: max-content;
+}
+.photo-grid.size-1{
+grid-template-columns: repeat(1,1fr);
+}
+
+.photo-grid.size-2{
+  grid-template-columns: repeat(2,1fr);
+}
+
+.photo-grid.size-3{
+  grid-template-columns: repeat(3,1fr);
+}
+
+.photo-grid.size-4{
+  grid-template-columns: repeat(4,1fr);
+}
+
+.photo-grid.size-5{
+  grid-template-columns: repeat(5,1fr);
 }
