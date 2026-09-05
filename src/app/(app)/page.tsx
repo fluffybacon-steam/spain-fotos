@@ -1,7 +1,7 @@
 "use client";
 // src/app/(app)/page.tsx
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MapCanvas from "@/components/MapCanvas";
 import PhotoPanel from "@/components/PhotoPanel";
 import PlacePicker from "@/components/PlacePicker";
@@ -22,7 +22,11 @@ export default function MapPage() {
   const [loading, setLoading] = useState(true);
   const [centre, setCentre] = useState<{ lat: number; lng: number } | null>(null);
   console.log("meId", meId);
-  const [panel, setPanel] = useState<{ ids: string[]; title?: string } | null>(null);
+  // `session` changes whenever a new set of photos is opened, so the panel
+  // remounts rather than inheriting the last pin's scroll position.
+  const [panel, setPanel] = useState<{ ids: string[]; title?: string; session: number } | null>(
+    null,
+  );
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
   // `mode` only affects wording and where Cancel returns to: "place" came from
@@ -103,8 +107,28 @@ export default function MapPage() {
     setLightboxIndex((i) => (i === null ? null : Math.max(0, i - 1)));
   }, []);
 
+  /* ── The panel's place in its own grid ────────────────────────────────────
+   *
+   * The lightbox unmounts the panel while it's up, so the grid's scroll
+   * position has to survive outside it. These refs are that handoff, and
+   * clearing them is what decides how long it lives: across a viewer
+   * round-trip, yes. Across closing the panel, or tapping a different pin, no —
+   * that's a fresh spot, and it starts at the top.
+   */
+  const panelScroll = useRef(0);
+  const panelFocus = useRef<string | null>(null);
+  const panelSession = useRef(0);
+
+  useEffect(() => {
+    if (panel) return;
+    panelScroll.current = 0;
+    panelFocus.current = null;
+  }, [panel]);
+
   const openPhotos = useCallback((selection: PhotoDTO[], startIndex: number) => {
-    setPanel({ ids: selection.map((p) => p.id) });
+    panelScroll.current = 0;
+    panelFocus.current = null;
+    setPanel({ ids: selection.map((p) => p.id), session: ++panelSession.current });
     setLightboxIndex(selection.length === 1 ? startIndex : null);
   }, []);
 
@@ -299,8 +323,11 @@ export default function MapPage() {
 
       {panel && lightboxIndex === null && (
         <PhotoPanel
+          key={panel.session}
           photos={panelPhotos}
           title={panel.title}
+          scrollTop={panelScroll}
+          focusId={panelFocus}
           onSelect={setLightboxIndex}
           onClose={() => setPanel(null)}
         />
@@ -323,6 +350,10 @@ export default function MapPage() {
             setPinFor({ ids: [id], mode: "move" });
           }}
           onClose={() => {
+            // The panel is about to remount; tell it which photo to come back
+            // to, since arrowing through a busy pin can travel a long way from
+            // the tile that was tapped.
+            panelFocus.current = panelPhotos[lightboxIndex]?.id ?? null;
             setLightboxIndex(null);
             if (panelPhotos.length === 1) setPanel(null);
           }}

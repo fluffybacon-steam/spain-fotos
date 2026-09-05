@@ -700,6 +700,21 @@ body {
   height: 36px;
 }
 
+/* An end-of-scale control that still lights up under the pointer reads as
+   broken rather than finished, so the hover is withdrawn along with the ink. */
+.btn:disabled,
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.icon-btn:disabled:hover {
+  background: color-mix(in srgb, var(--color-hull) 70%, transparent);
+  border-color: var(--color-hairline);
+}
+.btn-quiet:disabled:hover {
+  background: var(--color-hull);
+}
+
 .scroll-slim::-webkit-scrollbar {
   width: 8px;
   height: 8px;

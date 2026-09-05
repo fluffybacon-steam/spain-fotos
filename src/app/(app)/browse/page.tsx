@@ -17,6 +17,8 @@ import { IMAGE_PARAM } from "@/lib/photo-link";
 import { writeLocation } from "@/lib/client/place-photos";
 import { deletePhotos } from "@/lib/client/delete-photos";
 import { formatDuration } from "@/lib/client/video";
+import { tileColumns, useTileSize } from "@/lib/client/tile-size";
+import TileSizeControl from "@/components/TileSizeControl";
 import type { ReactionKind } from "@/db/schema";
 import type { PersonDTO, PhotoDTO } from "@/types";
 
@@ -112,6 +114,10 @@ export default function BrowsePage() {
   const [owner, setOwner] = useState<string | null>(null); // null = everyone
   const [mark, setMark] = useState<Mark>({ kind: "any" });
   const [index, setIndex] = useState<number | null>(null);
+  // Step 2 of the scale is six columns at this page's max-w-5xl, which is what
+  // the fixed `md:grid-cols-6` used to give — so nobody's gallery changes shape
+  // until they ask it to.
+  const tile = useTileSize("browse", 2);
 
   // Multi-select
   const [selectMode, setSelectMode] = useState(false);
@@ -171,14 +177,42 @@ export default function BrowsePage() {
     if (id) setWanted(id);
   }, []);
 
+  /* ── Keeping your place in the grid ───────────────────────────────────────
+   *
+   * Closing the viewer should land you where you were, and if you arrowed
+   * across half the trip while it was open, "where you were" is the photo
+   * you stopped on rather than the one you started from.
+   *
+   * So: the scroll position at the moment of opening is the baseline, and the
+   * photo on screen at the moment of closing pulls it if it has drifted out of
+   * view. Opening a photo and closing it straight away moves nothing at all,
+   * which is the common case and the one that has to feel like nothing
+   * happened.
+   */
+
+  /** Live tile elements by photo id, for the scroll-back. */
+  const tiles = useRef(new Map<string, HTMLElement>());
+  /** Window scroll at the moment the viewer opened. */
+  const scrollBeforeOpen = useRef(0);
+  /** The photo on screen right now, read at close time. */
+  const openPhotoId = useRef<string | null>(null);
+  /** Set by a close, consumed by the effect below. */
+  const returnToPhoto = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (index !== null) openPhotoId.current = shown[index]?.id ?? null;
+  }, [index, shown]);
+
   /** Opens a photo and gives it a history entry, so Back closes the viewer. */
   const openAt = useCallback((i: number, photoId: string) => {
+    scrollBeforeOpen.current = window.scrollY;
     setIndex(i);
     window.history.pushState(null, "", urlWithPhoto(photoId));
     pushedEntry.current = true;
   }, []);
 
   const closeViewer = useCallback(() => {
+    returnToPhoto.current = openPhotoId.current;
     setIndex(null);
     if (pushedEntry.current) {
       pushedEntry.current = false;
@@ -190,6 +224,43 @@ export default function BrowsePage() {
       window.history.replaceState(null, "", urlWithPhoto(null));
     }
   }, []);
+
+  /**
+   * Puts the grid back after the viewer closes.
+   *
+   * Two frames of delay: the first lets the viewer unmount and lift its body
+   * lock, the second lands after anything the browser or the router wants to
+   * do about the history entry Back just popped — otherwise a restoration we
+   * don't control fires last and wins.
+   *
+   * The tile only pulls the page when it isn't already fully on screen, so
+   * open-then-close doesn't nudge a gallery that was already in the right
+   * place. `center` clears the sticky date headings without needing to know
+   * how tall they are.
+   */
+  useEffect(() => {
+    if (index !== null) return;
+    const id = returnToPhoto.current;
+    if (id === null) return;
+    returnToPhoto.current = null;
+
+    const y = scrollBeforeOpen.current;
+    let cancelled = false;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        window.scrollTo(0, y);
+        const tile = tiles.current.get(id);
+        if (!tile) return; // deleted, or a filter is hiding it now
+        const box = tile.getBoundingClientRect();
+        const onScreen = box.top >= 0 && box.bottom <= window.innerHeight;
+        if (!onScreen) tile.scrollIntoView({ block: "center" });
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [index]);
 
   // The address follows whichever photo is open, however it got there: arrow
   // keys, a swipe, or the one after a deletion. Replace rather than push, so
@@ -206,6 +277,9 @@ export default function BrowsePage() {
       const id = photoInUrl();
       pushedEntry.current = Boolean(id);
       if (!id) {
+        // Back out of the viewer is a close like any other, and gets the same
+        // scroll-back as the close button.
+        returnToPhoto.current = openPhotoId.current;
         setIndex(null);
         return;
       }
@@ -658,6 +732,16 @@ export default function BrowsePage() {
         </div>
       )}
 
+      {/* Sits directly on top of the grid rather than up in the header: it
+          adjusts the thing immediately below it, and the header row is already
+          four controls wide on a phone. */}
+      {!loading && shown.length > 0 && (
+        <div className="mb-2 flex items-center justify-end gap-2 px-1">
+          <span className="coord">Thumbnails</span>
+          <TileSizeControl tile={tile} />
+        </div>
+      )}
+
       {groups.map(([label, items]) => (
         <section key={label} className="mb-6">
           <h2 className="eyebrow sticky top-0 z-10 -mx-3 flex items-center gap-2 bg-deep/90 px-4 py-2 backdrop-blur-sm">
@@ -674,13 +758,17 @@ export default function BrowsePage() {
               </button>
             )}
           </h2>
-          <div className="grid grid-cols-3 gap-1 sm:grid-cols-5 md:grid-cols-6">
+          <div className="grid gap-1" style={{ gridTemplateColumns: tileColumns(tile.size) }}>
             {items.map((photo) => {
               const isSelected = selected.has(photo.id);
               return (
                 <button
                   key={photo.id}
                   type="button"
+                  ref={(el) => {
+                    if (el) tiles.current.set(photo.id, el);
+                    else tiles.current.delete(photo.id);
+                  }}
                   onClick={() =>
                     selectMode
                       ? toggleSelected(photo.id)

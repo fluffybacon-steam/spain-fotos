@@ -139,14 +139,33 @@ export default function Lightbox({
       else if (e.key === "f") void toggleFavorite(); // no-ops for a guest
     }
     window.addEventListener("keydown", onKey);
-    // Stop the page behind from scrolling while the lightbox owns the screen.
+    return () => window.removeEventListener("keydown", onKey);
+  }, [go, onClose, toggleSelect, toggleFavorite, zoomed]);
+
+  /**
+   * Stops the page behind from scrolling while the lightbox owns the screen,
+   * and puts it back where it was on the way out.
+   *
+   * The restore isn't a nicety. `globals.css` sets `html, body { height: 100% }`,
+   * so `overflow: hidden` turns the body into a clipping box exactly one
+   * viewport tall: the document's scrollable area collapses to nothing and the
+   * browser clamps the scroll position to zero. Lifting the overflow again
+   * doesn't bring the number back, which is why closing the viewer used to land
+   * at the top of the gallery. It has to be carried across by hand.
+   *
+   * Mount-only, and deliberately not folded back into the keydown effect above:
+   * that one re-runs on every arrow press, and this would then re-read the
+   * position as zero and restore zero.
+   */
+  useEffect(() => {
+    const y = window.scrollY;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
-      window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
+      window.scrollTo(0, y);
     };
-  }, [go, onClose, toggleSelect, toggleFavorite, zoomed]);
+  }, []);
 
   // Warm the neighbours so arrowing through feels instant.
   useEffect(() => {
